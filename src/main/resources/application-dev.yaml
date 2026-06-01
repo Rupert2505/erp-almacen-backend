@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/erp_almacen
+    username: erp_user
+    password: Ballena2023$$
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: erp_almacen
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    schemas: erp_almacen
+    default-schema: erp_almacen
+    create-schemas: true
+    clean-disabled: true
+
+logging:
+  level:
+    org.flywaydb: info
+    org.hibernate.SQL: debug

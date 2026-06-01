@@ -1,0 +1,7 @@
+CREATE TABLE sistema_info (
+    id BIGSERIAL PRIMARY KEY,
+    clave VARCHAR(100) NOT NULL UNIQUE,
+    valor VARCHAR(255) NOT NULL,
+    descripcion VARCHAR(255),
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

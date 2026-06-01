@@ -1,13 +1,12 @@
-package pe.com.ballena.erpalmacenbackend;
+package pe.com.ballena.erpalmacen;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class ErpAlmacenBackendApplicationTests {
+class ErpAlmacenApplicationTests {
 
     @Test
     void contextLoads() {
     }
-
 }
