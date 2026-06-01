@@ -13,3 +13,11 @@ management:
     health:
       probes:
         enabled: true
+
+jwt:
+  expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+  issuer: ${JWT_ISSUER:erp-almacen-backend}
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
