@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioResponse;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
 import pe.com.ballena.erpalmacen.inventario.service.MovimientoInventarioService;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
@@ -87,6 +88,19 @@ public class MovimientoInventarioController {
         return ResponseEntity.ok(ApiResponse.ok(
                 "Movimiento confirmado correctamente",
                 movimientoInventarioService.confirmarMovimiento(id, authentication)
+        ));
+    }
+
+    @PostMapping("/{id}/anular")
+    @PreAuthorize("hasAuthority('INVENTARIO_AJUSTE') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> anular(
+            @PathVariable Long id,
+            @Valid @RequestBody MovimientoAnulacionRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                "Movimiento anulado correctamente",
+                movimientoInventarioService.anularMovimiento(id, request, authentication)
         ));
     }
 }

@@ -199,6 +199,122 @@ class MovimientoInventarioServiceTest {
                 .hasMessageContaining("ya fue confirmado");
     }
 
+    @Test
+    void anularEntradaConfirmadaReduceStockYGeneraKardexReverso() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("10.0000"));
+
+        movimientoInventarioService.anularMovimiento(entrada.getId(), "Error en entrada");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("0.0000");
+        assertThat(kardexRepository.findByMovimientoId(entrada.getId())).hasSize(2);
+        assertThat(entrada.getEstado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
+        assertThat(entrada.getAnuladoEn()).isNotNull();
+    }
+
+    @Test
+    void anularSalidaConfirmadaAumentaStockYGeneraKardexReverso() {
+        TestData data = crearDatosBase();
+        confirmarEntrada(data, new BigDecimal("10.0000"));
+        MovimientoInventarioEntity salida = crearMovimiento(
+                TipoMovimientoInventario.SALIDA_CONSUMO,
+                data.almacenOrigen(),
+                null,
+                data.usuario()
+        );
+        crearDetalle(salida, data.producto(), new BigDecimal("4.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(salida.getId());
+
+        movimientoInventarioService.anularMovimiento(salida.getId(), "Error en salida");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(kardexRepository.findByMovimientoId(salida.getId())).hasSize(2);
+        assertThat(salida.getEstado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
+    }
+
+    @Test
+    void anularTransferenciaRevierteOrigenYDestino() {
+        TestData data = crearDatosBase();
+        confirmarEntrada(data, new BigDecimal("10.0000"));
+        MovimientoInventarioEntity transferencia = crearMovimiento(
+                TipoMovimientoInventario.TRANSFERENCIA,
+                data.almacenOrigen(),
+                data.almacenDestino(),
+                data.usuario()
+        );
+        crearDetalle(transferencia, data.producto(), new BigDecimal("3.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(transferencia.getId());
+
+        movimientoInventarioService.anularMovimiento(transferencia.getId(), "Error en transferencia");
+
+        var stockOrigen = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        var stockDestino = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+
+        assertThat(stockOrigen.getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(stockDestino.getCantidadActual()).isEqualByComparingTo("0.0000");
+        assertThat(kardexRepository.findByMovimientoId(transferencia.getId())).hasSize(4);
+        assertThat(transferencia.getEstado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
+    }
+
+    @Test
+    void anularMovimientoBorradorLanzaBusinessException() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity movimiento = crearMovimiento(
+                TipoMovimientoInventario.ENTRADA_AJUSTE,
+                null,
+                data.almacenOrigen(),
+                data.usuario()
+        );
+        crearDetalle(movimiento, data.producto(), new BigDecimal("4.0000"), null, null, new BigDecimal("5.0000"));
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(movimiento.getId(), "Error"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("BORRADOR");
+    }
+
+    @Test
+    void anularMovimientoYaAnuladoLanzaBusinessException() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("10.0000"));
+        movimientoInventarioService.anularMovimiento(entrada.getId(), "Primera anulacion");
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(entrada.getId(), "Segunda anulacion"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("ya fue anulado");
+    }
+
+    @Test
+    void anularEntradaSinStockSuficienteParaRevertirLanzaBusinessException() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("10.0000"));
+        MovimientoInventarioEntity salida = crearMovimiento(
+                TipoMovimientoInventario.SALIDA_CONSUMO,
+                data.almacenOrigen(),
+                null,
+                data.usuario()
+        );
+        crearDetalle(salida, data.producto(), new BigDecimal("10.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(salida.getId());
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(entrada.getId(), "Sin stock para reversa"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Stock insuficiente");
+    }
+
     private MovimientoInventarioEntity confirmarEntrada(TestData data, BigDecimal cantidad) {
         MovimientoInventarioEntity entrada = crearMovimiento(
                 TipoMovimientoInventario.ENTRADA_AJUSTE,

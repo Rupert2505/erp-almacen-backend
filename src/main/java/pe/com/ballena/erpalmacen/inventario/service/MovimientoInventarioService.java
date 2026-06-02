@@ -11,6 +11,7 @@ import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.repository.UbicacionAlmacenRepository;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleResponse;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
@@ -163,6 +164,49 @@ public class MovimientoInventarioService {
 
         movimiento.setEstado(EstadoMovimientoInventario.CONFIRMADO);
         movimiento.setConfirmadoEn(LocalDateTime.now());
+        return movimiento;
+    }
+
+    @Transactional
+    public MovimientoInventarioResponse anularMovimiento(
+            Long movimientoId,
+            MovimientoAnulacionRequest request,
+            Authentication authentication
+    ) {
+        validarPermisoAnulacion(authentication);
+        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        MovimientoInventarioEntity anulado = anularMovimiento(movimiento, request.motivo());
+        return toResponse(anulado);
+    }
+
+    @Transactional
+    public MovimientoInventarioEntity anularMovimiento(Long movimientoId, String motivo) {
+        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        return anularMovimiento(movimiento, motivo);
+    }
+
+    private MovimientoInventarioEntity anularMovimiento(MovimientoInventarioEntity movimiento, String motivo) {
+        validarEstadoAnulable(movimiento);
+        String motivoLimpio = clean(motivo);
+        if (motivoLimpio == null || motivoLimpio.isBlank()) {
+            throw new BusinessException("El motivo de anulacion es obligatorio");
+        }
+
+        List<MovimientoDetalleEntity> detalles = movimientoDetalleRepository.findByMovimientoIdOrderByIdAsc(movimiento.getId());
+        if (detalles.isEmpty()) {
+            throw new BusinessException("El movimiento debe tener al menos un detalle");
+        }
+
+        validarCabecera(movimiento);
+        LocalDateTime fechaAnulacion = LocalDateTime.now();
+        for (MovimientoDetalleEntity detalle : detalles) {
+            anularDetalle(movimiento, detalle, motivoLimpio, fechaAnulacion);
+        }
+
+        movimiento.setEstado(EstadoMovimientoInventario.ANULADO);
+        movimiento.setAnuladoEn(fechaAnulacion);
         return movimiento;
     }
 
@@ -407,6 +451,155 @@ public class MovimientoInventarioService {
         );
     }
 
+    private void anularDetalle(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            String motivo,
+            LocalDateTime fechaAnulacion
+    ) {
+        validarDetalle(detalle);
+
+        TipoMovimientoInventario tipoMovimiento = movimiento.getTipoMovimiento();
+        if (esEntrada(tipoMovimiento)) {
+            anularEntrada(movimiento, detalle, motivo, fechaAnulacion);
+            return;
+        }
+        if (esSalida(tipoMovimiento)) {
+            anularSalida(movimiento, detalle, motivo, fechaAnulacion);
+            return;
+        }
+        if (tipoMovimiento == TipoMovimientoInventario.TRANSFERENCIA) {
+            anularTransferencia(movimiento, detalle, motivo, fechaAnulacion);
+            return;
+        }
+
+        throw new BusinessException("Tipo de movimiento no soportado");
+    }
+
+    private void anularEntrada(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            String motivo,
+            LocalDateTime fechaAnulacion
+    ) {
+        AlmacenEntity almacenDestino = movimiento.getAlmacenDestino();
+        UbicacionAlmacenEntity ubicacionDestino = detalle.getUbicacionDestino();
+        validarAlmacenActivo(almacenDestino, "almacen destino");
+        validarUbicacionActivaYCoherente(ubicacionDestino, almacenDestino, "ubicacion destino");
+
+        StockService.StockResultado stockResultado = stockService.registrarSalida(
+                detalle.getProducto(),
+                almacenDestino,
+                ubicacionDestino,
+                detalle.getCantidad(),
+                detalle.getCostoUnitario(),
+                fechaAnulacion
+        );
+
+        kardexService.registrar(
+                movimiento,
+                detalle,
+                almacenDestino,
+                ubicacionDestino,
+                BigDecimal.ZERO,
+                detalle.getCantidad(),
+                stockResultado,
+                observacionAnulacion(movimiento, motivo)
+        );
+    }
+
+    private void anularSalida(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            String motivo,
+            LocalDateTime fechaAnulacion
+    ) {
+        AlmacenEntity almacenOrigen = movimiento.getAlmacenOrigen();
+        UbicacionAlmacenEntity ubicacionOrigen = detalle.getUbicacionOrigen();
+        validarAlmacenActivo(almacenOrigen, "almacen origen");
+        validarUbicacionActivaYCoherente(ubicacionOrigen, almacenOrigen, "ubicacion origen");
+
+        StockService.StockResultado stockResultado = stockService.registrarEntrada(
+                detalle.getProducto(),
+                almacenOrigen,
+                ubicacionOrigen,
+                detalle.getCantidad(),
+                detalle.getCostoUnitario(),
+                fechaAnulacion
+        );
+
+        kardexService.registrar(
+                movimiento,
+                detalle,
+                almacenOrigen,
+                ubicacionOrigen,
+                detalle.getCantidad(),
+                BigDecimal.ZERO,
+                stockResultado,
+                observacionAnulacion(movimiento, motivo)
+        );
+    }
+
+    private void anularTransferencia(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            String motivo,
+            LocalDateTime fechaAnulacion
+    ) {
+        AlmacenEntity almacenOrigen = movimiento.getAlmacenOrigen();
+        AlmacenEntity almacenDestino = movimiento.getAlmacenDestino();
+        UbicacionAlmacenEntity ubicacionOrigen = detalle.getUbicacionOrigen();
+        UbicacionAlmacenEntity ubicacionDestino = detalle.getUbicacionDestino();
+
+        validarAlmacenActivo(almacenOrigen, "almacen origen");
+        validarAlmacenActivo(almacenDestino, "almacen destino");
+        if (almacenOrigen.getId().equals(almacenDestino.getId())) {
+            throw new BusinessException("El almacen origen no puede ser igual al almacen destino");
+        }
+        validarUbicacionActivaYCoherente(ubicacionOrigen, almacenOrigen, "ubicacion origen");
+        validarUbicacionActivaYCoherente(ubicacionDestino, almacenDestino, "ubicacion destino");
+
+        StockService.StockResultado entradaOrigen = stockService.registrarEntrada(
+                detalle.getProducto(),
+                almacenOrigen,
+                ubicacionOrigen,
+                detalle.getCantidad(),
+                detalle.getCostoUnitario(),
+                fechaAnulacion
+        );
+
+        kardexService.registrar(
+                movimiento,
+                detalle,
+                almacenOrigen,
+                ubicacionOrigen,
+                detalle.getCantidad(),
+                BigDecimal.ZERO,
+                entradaOrigen,
+                observacionAnulacion(movimiento, motivo)
+        );
+
+        StockService.StockResultado salidaDestino = stockService.registrarSalida(
+                detalle.getProducto(),
+                almacenDestino,
+                ubicacionDestino,
+                detalle.getCantidad(),
+                detalle.getCostoUnitario(),
+                fechaAnulacion
+        );
+
+        kardexService.registrar(
+                movimiento,
+                detalle,
+                almacenDestino,
+                ubicacionDestino,
+                BigDecimal.ZERO,
+                detalle.getCantidad(),
+                salidaDestino,
+                observacionAnulacion(movimiento, motivo)
+        );
+    }
+
     private void validarEstadoConfirmable(MovimientoInventarioEntity movimiento) {
         if (movimiento.getEstado() == EstadoMovimientoInventario.CONFIRMADO) {
             throw new BusinessException("El movimiento ya fue confirmado");
@@ -416,6 +609,18 @@ public class MovimientoInventarioService {
         }
         if (movimiento.getEstado() != EstadoMovimientoInventario.BORRADOR) {
             throw new BusinessException("Solo se pueden confirmar movimientos en estado BORRADOR");
+        }
+    }
+
+    private void validarEstadoAnulable(MovimientoInventarioEntity movimiento) {
+        if (movimiento.getEstado() == EstadoMovimientoInventario.BORRADOR) {
+            throw new BusinessException("No se puede anular un movimiento en estado BORRADOR");
+        }
+        if (movimiento.getEstado() == EstadoMovimientoInventario.ANULADO) {
+            throw new BusinessException("El movimiento ya fue anulado");
+        }
+        if (movimiento.getEstado() != EstadoMovimientoInventario.CONFIRMADO) {
+            throw new BusinessException("Solo se pueden anular movimientos en estado CONFIRMADO");
         }
     }
 
@@ -489,6 +694,14 @@ public class MovimientoInventarioService {
         if (!authorities.contains(permisoRequerido)) {
             throw new BusinessException("No tiene permisos para el tipo de movimiento solicitado");
         }
+    }
+
+    private void validarPermisoAnulacion(Authentication authentication) {
+        Set<String> authorities = obtenerAuthorities(authentication);
+        if (authorities.contains(ROLE_ADMIN) || authorities.contains(INVENTARIO_AJUSTE)) {
+            return;
+        }
+        throw new BusinessException("No tiene permisos para anular movimientos");
     }
 
     private Set<String> obtenerAuthorities(Authentication authentication) {
@@ -621,6 +834,11 @@ public class MovimientoInventarioService {
 
     private String resolverObservacion(MovimientoInventarioEntity movimiento, MovimientoDetalleEntity detalle) {
         return detalle.getObservacion() != null ? detalle.getObservacion() : movimiento.getObservacion();
+    }
+
+    private String observacionAnulacion(MovimientoInventarioEntity movimiento, String motivo) {
+        String observacion = "ANULACION MOVIMIENTO " + movimiento.getNumero() + ": " + motivo;
+        return observacion.length() <= 500 ? observacion : observacion.substring(0, 500);
     }
 
     private String normalizeSearch(String value) {
