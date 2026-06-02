@@ -3,10 +3,14 @@ package pe.com.ballena.erpalmacen.inventario.service;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.transaction.annotation.Transactional;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.kardex.repository.KardexRepository;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalleEntity;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoInventarioEntity;
 import pe.com.ballena.erpalmacen.inventario.movimientos.repository.MovimientoDetalleRepository;
@@ -23,6 +27,7 @@ import pe.com.ballena.erpalmacen.usuarios.entity.UsuarioEntity;
 import pe.com.ballena.erpalmacen.usuarios.repository.UsuarioRepository;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +63,42 @@ class MovimientoInventarioServiceTest {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
+
+    @Test
+    void crearMovimientoCreaBorradorSinAfectarStockNiKardex() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = new MovimientoInventarioCreateRequest(
+                TipoMovimientoInventario.ENTRADA_AJUSTE,
+                null,
+                null,
+                data.almacenOrigen().getId(),
+                "DOC-BORRADOR",
+                "Movimiento en borrador",
+                List.of(new MovimientoDetalleCreateRequest(
+                        data.producto().getId(),
+                        null,
+                        null,
+                        new BigDecimal("5.0000"),
+                        new BigDecimal("10.0000"),
+                        "Detalle borrador"
+                ))
+        );
+        var authentication = new UsernamePasswordAuthenticationToken(
+                "admin",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
+        );
+
+        var response = movimientoInventarioService.crearMovimiento(request, authentication);
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.BORRADOR);
+        assertThat(response.detalles()).hasSize(1);
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        )).isEmpty();
+        assertThat(kardexRepository.findByMovimientoId(response.id())).isEmpty();
+    }
 
     @Test
     void confirmarEntradaAumentaStockYGeneraKardex() {

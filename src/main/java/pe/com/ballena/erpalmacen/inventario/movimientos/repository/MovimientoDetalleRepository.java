@@ -8,4 +8,6 @@ import java.util.List;
 public interface MovimientoDetalleRepository extends JpaRepository<MovimientoDetalleEntity, Long> {
 
     List<MovimientoDetalleEntity> findByMovimientoId(Long movimientoId);
+
+    List<MovimientoDetalleEntity> findByMovimientoIdOrderByIdAsc(Long movimientoId);
 }
