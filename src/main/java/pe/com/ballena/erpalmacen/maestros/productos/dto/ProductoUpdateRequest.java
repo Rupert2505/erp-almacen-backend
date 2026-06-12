@@ -19,7 +19,13 @@ public record ProductoUpdateRequest(
         @Size(max = 255, message = "La descripcion no debe superar 255 caracteres")
         String descripcion,
 
-        Long categoriaId,
+        @NotNull(message = "El tipo de articulo es obligatorio")
+        Long tipoArticuloId,
+
+        @NotNull(message = "La familia es obligatoria")
+        Long familiaId,
+
+        Long subfamiliaId,
 
         Long marcaId,
 

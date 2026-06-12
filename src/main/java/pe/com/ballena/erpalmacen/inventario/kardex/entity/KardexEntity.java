@@ -73,10 +73,10 @@ public class KardexEntity {
     @Column(name = "saldo_final", nullable = false, precision = 18, scale = 4)
     private BigDecimal saldoFinal = BigDecimal.ZERO;
 
-    @Column(name = "costo_unitario", precision = 18, scale = 4)
+    @Column(name = "costo_unitario", precision = 18, scale = 6)
     private BigDecimal costoUnitario;
 
-    @Column(name = "costo_promedio", precision = 18, scale = 4)
+    @Column(name = "costo_promedio", precision = 18, scale = 6)
     private BigDecimal costoPromedio;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

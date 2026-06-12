@@ -41,7 +41,7 @@ public class StockActualEntity {
     @Column(name = "cantidad_actual", nullable = false, precision = 18, scale = 4)
     private BigDecimal cantidadActual = BigDecimal.ZERO;
 
-    @Column(name = "costo_promedio", precision = 18, scale = 4)
+    @Column(name = "costo_promedio", precision = 18, scale = 6)
     private BigDecimal costoPromedio;
 
     @Column(name = "fecha_ultimo_movimiento")

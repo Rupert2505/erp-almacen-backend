@@ -12,7 +12,10 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import pe.com.ballena.erpalmacen.maestros.categorias.entity.CategoriaEntity;
+import pe.com.ballena.erpalmacen.maestros.familias.entity.FamiliaEntity;
 import pe.com.ballena.erpalmacen.maestros.marcas.entity.MarcaEntity;
+import pe.com.ballena.erpalmacen.maestros.subfamilias.entity.SubfamiliaEntity;
+import pe.com.ballena.erpalmacen.maestros.tiposarticulo.entity.TipoArticuloEntity;
 import pe.com.ballena.erpalmacen.maestros.unidadesmedida.entity.UnidadMedidaEntity;
 
 import java.math.BigDecimal;
@@ -35,9 +38,21 @@ public class ProductoEntity {
     @Column(length = 255)
     private String descripcion;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "tipo_articulo_id", nullable = false)
+    private TipoArticuloEntity tipoArticulo;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "categoria_id")
     private CategoriaEntity categoria;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "familia_id", nullable = false)
+    private FamiliaEntity familia;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "subfamilia_id")
+    private SubfamiliaEntity subfamilia;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "marca_id")
@@ -109,12 +124,36 @@ public class ProductoEntity {
         this.descripcion = descripcion;
     }
 
+    public TipoArticuloEntity getTipoArticulo() {
+        return tipoArticulo;
+    }
+
+    public void setTipoArticulo(TipoArticuloEntity tipoArticulo) {
+        this.tipoArticulo = tipoArticulo;
+    }
+
     public CategoriaEntity getCategoria() {
         return categoria;
     }
 
     public void setCategoria(CategoriaEntity categoria) {
         this.categoria = categoria;
+    }
+
+    public FamiliaEntity getFamilia() {
+        return familia;
+    }
+
+    public void setFamilia(FamiliaEntity familia) {
+        this.familia = familia;
+    }
+
+    public SubfamiliaEntity getSubfamilia() {
+        return subfamilia;
+    }
+
+    public void setSubfamilia(SubfamiliaEntity subfamilia) {
+        this.subfamilia = subfamilia;
     }
 
     public MarcaEntity getMarca() {

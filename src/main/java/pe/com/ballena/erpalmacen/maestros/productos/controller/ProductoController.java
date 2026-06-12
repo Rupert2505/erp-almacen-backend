@@ -35,13 +35,15 @@ public class ProductoController {
     public ResponseEntity<ApiResponse<Page<ProductoResponse>>> listar(
             @RequestParam(required = false) String texto,
             @RequestParam(required = false) Boolean activo,
-            @RequestParam(required = false) Long categoriaId,
+            @RequestParam(required = false) Long tipoArticuloId,
+            @RequestParam(required = false) Long familiaId,
+            @RequestParam(required = false) Long subfamiliaId,
             @RequestParam(required = false) Long marcaId,
             @RequestParam(required = false) Long unidadMedidaId,
             Pageable pageable
     ) {
         return ResponseEntity.ok(ApiResponse.ok(
-                productoService.listar(texto, activo, categoriaId, marcaId, unidadMedidaId, pageable)
+                productoService.listar(texto, activo, tipoArticuloId, familiaId, subfamiliaId, marcaId, unidadMedidaId, pageable)
         ));
     }
 

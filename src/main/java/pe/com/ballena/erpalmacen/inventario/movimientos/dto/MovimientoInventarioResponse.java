@@ -3,6 +3,8 @@ package pe.com.ballena.erpalmacen.inventario.movimientos.dto;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -18,11 +20,37 @@ public record MovimientoInventarioResponse(
         Long almacenOrigenId,
         String almacenOrigenCodigo,
         String almacenOrigenNombre,
+        Long ubicacionOrigenId,
         Long almacenDestinoId,
         String almacenDestinoCodigo,
         String almacenDestinoNombre,
+        Long ubicacionDestinoId,
         String documentoReferencia,
         String observacion,
+        String motivoMovimiento,
+        String ordenTrabajo,
+        String areaSolicitante,
+        String solicitante,
+        String responsableEntrega,
+        String responsableRecepcion,
+        String guiaSerie,
+        String guiaNumero,
+        LocalDate guiaFecha,
+        String comprobanteTipo,
+        String comprobanteSerie,
+        String comprobanteNumero,
+        LocalDate comprobanteFechaEmision,
+        String ordenCompraNumero,
+        String tipoDocumento,
+        String serieDocumento,
+        String numeroDocumento,
+        String ordenCompra,
+        LocalDate fechaPedido,
+        LocalDate fechaRecepcion,
+        BigDecimal flete,
+        BigDecimal movilidad,
+        BigDecimal otrosGastos,
+        String observacionDocumentaria,
         Long usuarioId,
         String username,
         LocalDateTime confirmadoEn,

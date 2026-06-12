@@ -1,7 +1,9 @@
 package pe.com.ballena.erpalmacen.inventario.service;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -46,6 +48,7 @@ public class MovimientoInventarioService {
     private static final String INVENTARIO_SALIDA = "INVENTARIO_SALIDA";
     private static final String INVENTARIO_TRANSFERENCIA = "INVENTARIO_TRANSFERENCIA";
     private static final String INVENTARIO_AJUSTE = "INVENTARIO_AJUSTE";
+    private static final Set<String> COMPROBANTE_TIPOS_PERMITIDOS = Set.of("FACTURA", "BOLETA", "OTRO");
 
     private final MovimientoInventarioRepository movimientoInventarioRepository;
     private final MovimientoDetalleRepository movimientoDetalleRepository;
@@ -99,17 +102,54 @@ public class MovimientoInventarioService {
         movimiento.setNumero(numeroMovimientoService.generar());
         movimiento.setTipoMovimiento(request.tipoMovimiento());
         movimiento.setEstado(EstadoMovimientoInventario.BORRADOR);
+        movimiento.setFechaMovimiento(request.fechaMovimiento());
         movimiento.setProveedor(proveedor);
         movimiento.setAlmacenOrigen(almacenOrigen);
         movimiento.setAlmacenDestino(almacenDestino);
         movimiento.setDocumentoReferencia(clean(request.documentoReferencia()));
         movimiento.setObservacion(clean(request.observacion()));
+        movimiento.setMotivoMovimiento(clean(request.motivoMovimiento()));
+        movimiento.setOrdenTrabajo(clean(request.ordenTrabajo()));
+        movimiento.setAreaSolicitante(clean(request.areaSolicitante()));
+        movimiento.setSolicitante(clean(request.solicitante()));
+        movimiento.setResponsableEntrega(clean(request.responsableEntrega()));
+        movimiento.setResponsableRecepcion(clean(request.responsableRecepcion()));
+        movimiento.setGuiaSerie(clean(request.guiaSerie()));
+        movimiento.setGuiaNumero(clean(request.guiaNumero()));
+        movimiento.setGuiaFecha(request.guiaFecha());
+        movimiento.setComprobanteTipo(normalizeUpper(request.comprobanteTipo()));
+        movimiento.setComprobanteSerie(clean(request.comprobanteSerie()));
+        movimiento.setComprobanteNumero(clean(request.comprobanteNumero()));
+        movimiento.setComprobanteFechaEmision(request.comprobanteFechaEmision());
+        movimiento.setOrdenCompraNumero(clean(request.ordenCompraNumero()));
+        movimiento.setTipoDocumento(clean(request.tipoDocumento()));
+        movimiento.setSerieDocumento(clean(request.serieDocumento()));
+        movimiento.setNumeroDocumento(clean(request.numeroDocumento()));
+        movimiento.setOrdenCompra(clean(request.ordenCompra()));
+        movimiento.setFechaPedido(request.fechaPedido());
+        movimiento.setFechaRecepcion(request.fechaRecepcion());
+        movimiento.setFlete(request.flete());
+        movimiento.setMovilidad(request.movilidad());
+        movimiento.setOtrosGastos(request.otrosGastos());
+        movimiento.setObservacionDocumentaria(clean(request.observacionDocumentaria()));
         movimiento.setUsuario(usuario);
         MovimientoInventarioEntity guardado = movimientoInventarioRepository.save(movimiento);
 
         for (MovimientoDetalleCreateRequest detalleRequest : request.detalles()) {
-            MovimientoDetalleEntity detalle = construirDetalle(guardado, detalleRequest, almacenOrigen, almacenDestino);
+            MovimientoDetalleEntity detalle = construirDetalle(
+                    guardado,
+                    detalleRequest,
+                    almacenOrigen,
+                    almacenDestino,
+                    request.ubicacionOrigenId(),
+                    request.ubicacionDestinoId()
+            );
             movimientoDetalleRepository.save(detalle);
+        }
+
+        if (Boolean.TRUE.equals(request.confirmar())) {
+            MovimientoInventarioEntity confirmado = confirmarMovimiento(guardado.getId());
+            return toResponse(confirmado);
         }
 
         return toResponse(guardado);
@@ -133,7 +173,7 @@ public class MovimientoInventarioService {
     ) {
         return movimientoInventarioRepository.findAll(
                 buildSpecification(tipoMovimiento, estado, fechaDesde, fechaHasta, texto),
-                pageable
+                aplicarOrdenPorDefecto(pageable)
         ).map(this::toResponse);
     }
 
@@ -157,7 +197,7 @@ public class MovimientoInventarioService {
             throw new BusinessException("El movimiento debe tener al menos un detalle");
         }
 
-        validarCabecera(movimiento);
+        validarCabeceraConfirmacion(movimiento);
         for (MovimientoDetalleEntity detalle : detalles) {
             confirmarDetalle(movimiento, detalle);
         }
@@ -199,7 +239,7 @@ public class MovimientoInventarioService {
             throw new BusinessException("El movimiento debe tener al menos un detalle");
         }
 
-        validarCabecera(movimiento);
+        validarCabeceraBase(movimiento);
         LocalDateTime fechaAnulacion = LocalDateTime.now();
         for (MovimientoDetalleEntity detalle : detalles) {
             anularDetalle(movimiento, detalle, motivoLimpio, fechaAnulacion);
@@ -214,7 +254,9 @@ public class MovimientoInventarioService {
             MovimientoInventarioEntity movimiento,
             MovimientoDetalleCreateRequest request,
             AlmacenEntity almacenOrigen,
-            AlmacenEntity almacenDestino
+            AlmacenEntity almacenDestino,
+            Long ubicacionOrigenCabeceraId,
+            Long ubicacionDestinoCabeceraId
     ) {
         ProductoEntity producto = productoRepository.findById(request.productoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado"));
@@ -223,12 +265,12 @@ public class MovimientoInventarioService {
         }
 
         UbicacionAlmacenEntity ubicacionOrigen = obtenerUbicacionActivaSiAplica(
-                request.ubicacionOrigenId(),
+                request.ubicacionOrigenId() != null ? request.ubicacionOrigenId() : ubicacionOrigenCabeceraId,
                 almacenOrigen,
                 "ubicacion origen"
         );
         UbicacionAlmacenEntity ubicacionDestino = obtenerUbicacionActivaSiAplica(
-                request.ubicacionDestinoId(),
+                request.ubicacionDestinoId() != null ? request.ubicacionDestinoId() : ubicacionDestinoCabeceraId,
                 almacenDestino,
                 "ubicacion destino"
         );
@@ -247,22 +289,127 @@ public class MovimientoInventarioService {
 
     private void validarRequestCabecera(MovimientoInventarioCreateRequest request) {
         TipoMovimientoInventario tipoMovimiento = request.tipoMovimiento();
-        if (tipoMovimiento == TipoMovimientoInventario.ENTRADA_COMPRA && request.proveedorId() == null) {
-            throw new BusinessException("La entrada por compra requiere proveedor");
+        if (tipoMovimiento == null) {
+            throw new BusinessException("El tipo de movimiento es obligatorio");
         }
-        if (esEntrada(tipoMovimiento) && request.almacenDestinoId() == null) {
-            throw new BusinessException("El movimiento requiere almacen destino");
+        if (request.fechaMovimiento() == null) {
+            throw new BusinessException("La fecha del movimiento es obligatoria");
         }
-        if (esSalida(tipoMovimiento) && request.almacenOrigenId() == null) {
-            throw new BusinessException("El movimiento requiere almacen origen");
+        if (request.detalles() == null || request.detalles().isEmpty()) {
+            throw new BusinessException("El movimiento debe tener al menos un detalle");
         }
-        if (tipoMovimiento == TipoMovimientoInventario.TRANSFERENCIA) {
-            if (request.almacenOrigenId() == null || request.almacenDestinoId() == null) {
-                throw new BusinessException("La transferencia requiere almacen origen y destino");
+        validarDatosDocumentales(request);
+
+        switch (tipoMovimiento) {
+            case ENTRADA_COMPRA -> {
+                requerir(request.proveedorId(), "La entrada por compra requiere proveedor");
+                requerir(request.almacenDestinoId(), "La entrada por compra requiere almacen destino");
+                requerir(request.fechaRecepcion(), "La entrada por compra requiere fecha de recepcion");
             }
-            if (request.almacenOrigenId().equals(request.almacenDestinoId())) {
-                throw new BusinessException("El almacen origen no puede ser igual al almacen destino");
+            case ENTRADA_AJUSTE -> {
+                requerir(request.almacenDestinoId(), "La entrada por ajuste requiere almacen destino");
+                requerirTexto(request.motivoMovimiento(), "La entrada por ajuste requiere motivo");
+                requerirTexto(request.observacion(), "La entrada por ajuste requiere observacion");
             }
+            case SALIDA_CONSUMO -> {
+                requerir(request.almacenOrigenId(), "La salida por consumo requiere almacen origen");
+                requerirTexto(request.motivoMovimiento(), "La salida por consumo requiere motivo");
+                requerirTexto(request.observacion(), "La salida por consumo requiere observacion");
+            }
+            case SALIDA_VENTA -> requerir(request.almacenOrigenId(), "La salida por venta requiere almacen origen");
+            case SALIDA_AJUSTE -> {
+                requerir(request.almacenOrigenId(), "La salida por ajuste requiere almacen origen");
+                requerirTexto(request.motivoMovimiento(), "La salida por ajuste requiere motivo");
+                requerirTexto(request.observacion(), "La salida por ajuste requiere observacion");
+            }
+            case TRANSFERENCIA -> {
+                requerir(request.almacenOrigenId(), "La transferencia requiere almacen origen");
+                requerir(request.almacenDestinoId(), "La transferencia requiere almacen destino");
+                if (request.almacenOrigenId().equals(request.almacenDestinoId())) {
+                    throw new BusinessException("El almacen origen no puede ser igual al almacen destino");
+                }
+            }
+            case AJUSTE_POSITIVO -> {
+                requerir(request.almacenDestinoId(), "El ajuste positivo requiere almacen destino");
+                requerirTexto(request.motivoMovimiento(), "El ajuste positivo requiere motivo");
+                requerirTexto(request.observacion(), "El ajuste positivo requiere observacion");
+            }
+            case AJUSTE_NEGATIVO -> {
+                requerir(request.almacenOrigenId(), "El ajuste negativo requiere almacen origen");
+                requerirTexto(request.motivoMovimiento(), "El ajuste negativo requiere motivo");
+                requerirTexto(request.observacion(), "El ajuste negativo requiere observacion");
+            }
+        }
+
+        for (MovimientoDetalleCreateRequest detalle : request.detalles()) {
+            validarDetalleRequest(tipoMovimiento, detalle);
+        }
+    }
+
+    private void validarDetalleRequest(TipoMovimientoInventario tipoMovimiento, MovimientoDetalleCreateRequest detalle) {
+        if (detalle == null) {
+            throw new BusinessException("El detalle del movimiento es obligatorio");
+        }
+        requerir(detalle.productoId(), "El producto del detalle es obligatorio");
+        if (detalle.cantidad() == null || detalle.cantidad().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException("La cantidad del detalle debe ser mayor que cero");
+        }
+        if (detalle.costoUnitario() != null && detalle.costoUnitario().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("El costo unitario no puede ser negativo");
+        }
+        if (tipoMovimiento == TipoMovimientoInventario.ENTRADA_COMPRA && detalle.costoUnitario() == null) {
+            throw new BusinessException("La entrada por compra requiere costo unitario por linea");
+        }
+    }
+
+    private void validarDatosDocumentales(MovimientoInventarioCreateRequest request) {
+        validarMontoNoNegativo(request.flete(), "El flete no puede ser negativo");
+        validarMontoNoNegativo(request.movilidad(), "La movilidad no puede ser negativa");
+        validarMontoNoNegativo(request.otrosGastos(), "Otros gastos no puede ser negativo");
+        validarSerieNumero(
+                request.guiaSerie(),
+                request.guiaNumero(),
+                "La serie y numero de guia deben informarse juntos"
+        );
+        validarSerieNumero(
+                request.comprobanteSerie(),
+                request.comprobanteNumero(),
+                "La serie y numero de comprobante deben informarse juntos"
+        );
+        String comprobanteTipo = normalizeUpper(request.comprobanteTipo());
+        if (comprobanteTipo != null && !COMPROBANTE_TIPOS_PERMITIDOS.contains(comprobanteTipo)) {
+            throw new BusinessException("El tipo de comprobante debe ser FACTURA, BOLETA u OTRO");
+        }
+        if (request.fechaPedido() != null
+                && request.fechaRecepcion() != null
+                && request.fechaRecepcion().isBefore(request.fechaPedido())) {
+            throw new BusinessException("La fecha de recepcion no puede ser menor que la fecha de pedido");
+        }
+    }
+
+    private void validarSerieNumero(String serie, String numero, String mensaje) {
+        boolean tieneSerie = hasText(serie);
+        boolean tieneNumero = hasText(numero);
+        if (tieneSerie != tieneNumero) {
+            throw new BusinessException(mensaje);
+        }
+    }
+
+    private void validarMontoNoNegativo(BigDecimal value, String message) {
+        if (value != null && value.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException(message);
+        }
+    }
+
+    private void requerir(Object value, String message) {
+        if (value == null) {
+            throw new BusinessException(message);
+        }
+    }
+
+    private void requerirTexto(String value, String message) {
+        if (!hasText(value)) {
+            throw new BusinessException(message);
         }
     }
 
@@ -320,7 +467,7 @@ public class MovimientoInventarioService {
     }
 
     private void confirmarDetalle(MovimientoInventarioEntity movimiento, MovimientoDetalleEntity detalle) {
-        validarDetalle(detalle);
+        validarDetalle(movimiento, detalle);
 
         TipoMovimientoInventario tipoMovimiento = movimiento.getTipoMovimiento();
         if (esEntrada(tipoMovimiento)) {
@@ -457,7 +604,7 @@ public class MovimientoInventarioService {
             String motivo,
             LocalDateTime fechaAnulacion
     ) {
-        validarDetalle(detalle);
+        validarDetalle(movimiento, detalle);
 
         TipoMovimientoInventario tipoMovimiento = movimiento.getTipoMovimiento();
         if (esEntrada(tipoMovimiento)) {
@@ -624,7 +771,7 @@ public class MovimientoInventarioService {
         }
     }
 
-    private void validarCabecera(MovimientoInventarioEntity movimiento) {
+    private void validarCabeceraBase(MovimientoInventarioEntity movimiento) {
         if (movimiento.getTipoMovimiento() == null) {
             throw new BusinessException("El tipo de movimiento es obligatorio");
         }
@@ -646,13 +793,79 @@ public class MovimientoInventarioService {
         }
     }
 
-    private void validarDetalle(MovimientoDetalleEntity detalle) {
+    private void validarCabeceraConfirmacion(MovimientoInventarioEntity movimiento) {
+        validarCabeceraBase(movimiento);
+        if (movimiento.getFechaMovimiento() == null) {
+            throw new BusinessException("La fecha del movimiento es obligatoria");
+        }
+
+        switch (movimiento.getTipoMovimiento()) {
+            case ENTRADA_COMPRA -> {
+                if (movimiento.getFechaRecepcion() == null) {
+                    throw new BusinessException("La entrada por compra requiere fecha de recepcion");
+                }
+            }
+            case ENTRADA_AJUSTE -> validarMotivoYObservacion(
+                    movimiento,
+                    "La entrada por ajuste requiere motivo",
+                    "La entrada por ajuste requiere observacion"
+            );
+            case SALIDA_CONSUMO -> validarMotivoYObservacion(
+                    movimiento,
+                    "La salida por consumo requiere motivo",
+                    "La salida por consumo requiere observacion"
+            );
+            case SALIDA_VENTA -> {
+            }
+            case SALIDA_AJUSTE -> validarMotivoYObservacion(
+                    movimiento,
+                    "La salida por ajuste requiere motivo",
+                    "La salida por ajuste requiere observacion"
+            );
+            case TRANSFERENCIA -> {
+                if (movimiento.getAlmacenOrigen().getId().equals(movimiento.getAlmacenDestino().getId())) {
+                    throw new BusinessException("El almacen origen no puede ser igual al almacen destino");
+                }
+            }
+            case AJUSTE_POSITIVO -> validarMotivoYObservacion(
+                    movimiento,
+                    "El ajuste positivo requiere motivo",
+                    "El ajuste positivo requiere observacion"
+            );
+            case AJUSTE_NEGATIVO -> validarMotivoYObservacion(
+                    movimiento,
+                    "El ajuste negativo requiere motivo",
+                    "El ajuste negativo requiere observacion"
+            );
+        }
+    }
+
+    private void validarMotivoYObservacion(
+            MovimientoInventarioEntity movimiento,
+            String mensajeMotivo,
+            String mensajeObservacion
+    ) {
+        if (!hasText(movimiento.getMotivoMovimiento())) {
+            throw new BusinessException(mensajeMotivo);
+        }
+        if (!hasText(movimiento.getObservacion())) {
+            throw new BusinessException(mensajeObservacion);
+        }
+    }
+
+    private void validarDetalle(MovimientoInventarioEntity movimiento, MovimientoDetalleEntity detalle) {
         ProductoEntity producto = detalle.getProducto();
         if (producto == null || !producto.isActivo()) {
             throw new BusinessException("El producto del detalle es obligatorio y debe estar activo");
         }
         if (detalle.getCantidad() == null || detalle.getCantidad().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessException("La cantidad del detalle debe ser mayor que cero");
+        }
+        if (detalle.getCostoUnitario() != null && detalle.getCostoUnitario().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("El costo unitario no puede ser negativo");
+        }
+        if (movimiento.getTipoMovimiento() == TipoMovimientoInventario.ENTRADA_COMPRA && detalle.getCostoUnitario() == null) {
+            throw new BusinessException("La entrada por compra requiere costo unitario por linea");
         }
     }
 
@@ -754,6 +967,23 @@ public class MovimientoInventarioService {
                 predicates.add(criteriaBuilder.or(
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("numero")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("documentoReferencia")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("motivoMovimiento")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("ordenTrabajo")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("areaSolicitante")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("solicitante")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("responsableEntrega")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("responsableRecepcion")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("guiaSerie")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("guiaNumero")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("comprobanteTipo")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("comprobanteSerie")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("comprobanteNumero")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("ordenCompraNumero")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("tipoDocumento")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("serieDocumento")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("numeroDocumento")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("ordenCompra")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("observacionDocumentaria")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("observacion")), pattern)
                 ));
             }
@@ -761,10 +991,24 @@ public class MovimientoInventarioService {
         };
     }
 
+    private Pageable aplicarOrdenPorDefecto(Pageable pageable) {
+        if (pageable == null) {
+            return PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "creadoEn", "id"));
+        }
+        if (pageable.getSort().isSorted()) {
+            return pageable;
+        }
+        return PageRequest.of(
+                pageable.getPageNumber(),
+                pageable.getPageSize(),
+                Sort.by(Sort.Direction.DESC, "creadoEn", "id")
+        );
+    }
+
     private MovimientoInventarioResponse toResponse(MovimientoInventarioEntity movimiento) {
-        List<MovimientoDetalleResponse> detalles = movimientoDetalleRepository
-                .findByMovimientoIdOrderByIdAsc(movimiento.getId())
-                .stream()
+        List<MovimientoDetalleEntity> detalleEntities = movimientoDetalleRepository
+                .findByMovimientoIdOrderByIdAsc(movimiento.getId());
+        List<MovimientoDetalleResponse> detalles = detalleEntities.stream()
                 .map(this::toDetalleResponse)
                 .toList();
 
@@ -785,11 +1029,37 @@ public class MovimientoInventarioService {
                 almacenOrigen == null ? null : almacenOrigen.getId(),
                 almacenOrigen == null ? null : almacenOrigen.getCodigo(),
                 almacenOrigen == null ? null : almacenOrigen.getNombre(),
+                obtenerUbicacionOrigenCabeceraId(detalleEntities),
                 almacenDestino == null ? null : almacenDestino.getId(),
                 almacenDestino == null ? null : almacenDestino.getCodigo(),
                 almacenDestino == null ? null : almacenDestino.getNombre(),
+                obtenerUbicacionDestinoCabeceraId(detalleEntities),
                 movimiento.getDocumentoReferencia(),
                 movimiento.getObservacion(),
+                movimiento.getMotivoMovimiento(),
+                movimiento.getOrdenTrabajo(),
+                movimiento.getAreaSolicitante(),
+                movimiento.getSolicitante(),
+                movimiento.getResponsableEntrega(),
+                movimiento.getResponsableRecepcion(),
+                movimiento.getGuiaSerie(),
+                movimiento.getGuiaNumero(),
+                movimiento.getGuiaFecha(),
+                movimiento.getComprobanteTipo(),
+                movimiento.getComprobanteSerie(),
+                movimiento.getComprobanteNumero(),
+                movimiento.getComprobanteFechaEmision(),
+                movimiento.getOrdenCompraNumero(),
+                movimiento.getTipoDocumento(),
+                movimiento.getSerieDocumento(),
+                movimiento.getNumeroDocumento(),
+                movimiento.getOrdenCompra(),
+                movimiento.getFechaPedido(),
+                movimiento.getFechaRecepcion(),
+                movimiento.getFlete(),
+                movimiento.getMovilidad(),
+                movimiento.getOtrosGastos(),
+                movimiento.getObservacionDocumentaria(),
                 usuario == null ? null : usuario.getId(),
                 usuario == null ? null : usuario.getUsername(),
                 movimiento.getConfirmadoEn(),
@@ -825,6 +1095,24 @@ public class MovimientoInventarioService {
         );
     }
 
+    private Long obtenerUbicacionOrigenCabeceraId(List<MovimientoDetalleEntity> detalles) {
+        return detalles.stream()
+                .map(MovimientoDetalleEntity::getUbicacionOrigen)
+                .filter(java.util.Objects::nonNull)
+                .map(UbicacionAlmacenEntity::getId)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Long obtenerUbicacionDestinoCabeceraId(List<MovimientoDetalleEntity> detalles) {
+        return detalles.stream()
+                .map(MovimientoDetalleEntity::getUbicacionDestino)
+                .filter(java.util.Objects::nonNull)
+                .map(UbicacionAlmacenEntity::getId)
+                .findFirst()
+                .orElse(null);
+    }
+
     private BigDecimal calcularTotalLinea(BigDecimal cantidad, BigDecimal costoUnitario) {
         if (cantidad == null || costoUnitario == null) {
             return null;
@@ -846,7 +1134,20 @@ public class MovimientoInventarioService {
         return cleanValue == null || cleanValue.isBlank() ? null : cleanValue;
     }
 
+    private boolean hasText(String value) {
+        return clean(value) != null;
+    }
+
+    private String normalizeUpper(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null ? null : cleanValue.toUpperCase(Locale.ROOT);
+    }
+
     private String clean(String value) {
-        return value == null ? null : value.trim();
+        if (value == null) {
+            return null;
+        }
+        String cleanValue = value.trim();
+        return cleanValue.isEmpty() ? null : cleanValue;
     }
 }

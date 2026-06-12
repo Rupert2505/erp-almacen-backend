@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 @Service
 public class StockService {
 
-    private static final int COST_SCALE = 4;
+    private static final int COST_SCALE = 6;
 
     private final StockActualRepository stockActualRepository;
 

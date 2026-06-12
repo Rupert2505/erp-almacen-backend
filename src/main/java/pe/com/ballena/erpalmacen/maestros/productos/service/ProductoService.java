@@ -5,8 +5,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import pe.com.ballena.erpalmacen.maestros.categorias.entity.CategoriaEntity;
-import pe.com.ballena.erpalmacen.maestros.categorias.repository.CategoriaRepository;
+import pe.com.ballena.erpalmacen.maestros.familias.entity.FamiliaEntity;
+import pe.com.ballena.erpalmacen.maestros.familias.repository.FamiliaRepository;
 import pe.com.ballena.erpalmacen.maestros.marcas.entity.MarcaEntity;
 import pe.com.ballena.erpalmacen.maestros.marcas.repository.MarcaRepository;
 import pe.com.ballena.erpalmacen.maestros.productos.dto.ProductoCreateRequest;
@@ -14,6 +14,10 @@ import pe.com.ballena.erpalmacen.maestros.productos.dto.ProductoResponse;
 import pe.com.ballena.erpalmacen.maestros.productos.dto.ProductoUpdateRequest;
 import pe.com.ballena.erpalmacen.maestros.productos.entity.ProductoEntity;
 import pe.com.ballena.erpalmacen.maestros.productos.repository.ProductoRepository;
+import pe.com.ballena.erpalmacen.maestros.subfamilias.entity.SubfamiliaEntity;
+import pe.com.ballena.erpalmacen.maestros.subfamilias.repository.SubfamiliaRepository;
+import pe.com.ballena.erpalmacen.maestros.tiposarticulo.entity.TipoArticuloEntity;
+import pe.com.ballena.erpalmacen.maestros.tiposarticulo.repository.TipoArticuloRepository;
 import pe.com.ballena.erpalmacen.maestros.unidadesmedida.entity.UnidadMedidaEntity;
 import pe.com.ballena.erpalmacen.maestros.unidadesmedida.repository.UnidadMedidaRepository;
 import pe.com.ballena.erpalmacen.shared.exception.BusinessException;
@@ -26,19 +30,25 @@ import java.util.Locale;
 public class ProductoService {
 
     private final ProductoRepository productoRepository;
-    private final CategoriaRepository categoriaRepository;
+    private final FamiliaRepository familiaRepository;
+    private final SubfamiliaRepository subfamiliaRepository;
     private final MarcaRepository marcaRepository;
+    private final TipoArticuloRepository tipoArticuloRepository;
     private final UnidadMedidaRepository unidadMedidaRepository;
 
     public ProductoService(
             ProductoRepository productoRepository,
-            CategoriaRepository categoriaRepository,
+            FamiliaRepository familiaRepository,
+            SubfamiliaRepository subfamiliaRepository,
             MarcaRepository marcaRepository,
+            TipoArticuloRepository tipoArticuloRepository,
             UnidadMedidaRepository unidadMedidaRepository
     ) {
         this.productoRepository = productoRepository;
-        this.categoriaRepository = categoriaRepository;
+        this.familiaRepository = familiaRepository;
+        this.subfamiliaRepository = subfamiliaRepository;
         this.marcaRepository = marcaRepository;
+        this.tipoArticuloRepository = tipoArticuloRepository;
         this.unidadMedidaRepository = unidadMedidaRepository;
     }
 
@@ -46,12 +56,14 @@ public class ProductoService {
     public Page<ProductoResponse> listar(
             String texto,
             Boolean activo,
-            Long categoriaId,
+            Long tipoArticuloId,
+            Long familiaId,
+            Long subfamiliaId,
             Long marcaId,
             Long unidadMedidaId,
             Pageable pageable
     ) {
-        return productoRepository.findAll(buildSpecification(texto, activo, categoriaId, marcaId, unidadMedidaId), pageable)
+        return productoRepository.findAll(buildSpecification(texto, activo, tipoArticuloId, familiaId, subfamiliaId, marcaId, unidadMedidaId), pageable)
                 .map(this::toResponse);
     }
 
@@ -104,10 +116,15 @@ public class ProductoService {
     private void applyValues(ProductoEntity producto, ProductoCreateRequest request) {
         BigDecimal stockMinimo = request.stockMinimo() == null ? BigDecimal.ZERO : request.stockMinimo();
         validateAmounts(stockMinimo, request.stockMaximo(), request.costoReferencial());
+        TipoArticuloEntity tipoArticulo = findTipoArticuloActivo(request.tipoArticuloId());
+        FamiliaEntity familia = findFamiliaActiva(request.familiaId());
+        SubfamiliaEntity subfamilia = findSubfamiliaActiva(request.subfamiliaId(), familia);
 
         producto.setNombre(cleanRequired(request.nombre()));
         producto.setDescripcion(clean(request.descripcion()));
-        producto.setCategoria(findCategoriaActiva(request.categoriaId()));
+        producto.setTipoArticulo(tipoArticulo);
+        producto.setFamilia(familia);
+        producto.setSubfamilia(subfamilia);
         producto.setMarca(findMarcaActiva(request.marcaId()));
         producto.setUnidadMedida(findUnidadMedidaActiva(request.unidadMedidaId()));
         producto.setStockMinimo(stockMinimo);
@@ -120,10 +137,15 @@ public class ProductoService {
     private void applyValues(ProductoEntity producto, ProductoUpdateRequest request) {
         BigDecimal stockMinimo = request.stockMinimo() == null ? BigDecimal.ZERO : request.stockMinimo();
         validateAmounts(stockMinimo, request.stockMaximo(), request.costoReferencial());
+        TipoArticuloEntity tipoArticulo = findTipoArticuloActivo(request.tipoArticuloId());
+        FamiliaEntity familia = findFamiliaActiva(request.familiaId());
+        SubfamiliaEntity subfamilia = findSubfamiliaActiva(request.subfamiliaId(), familia);
 
         producto.setNombre(cleanRequired(request.nombre()));
         producto.setDescripcion(clean(request.descripcion()));
-        producto.setCategoria(findCategoriaActiva(request.categoriaId()));
+        producto.setTipoArticulo(tipoArticulo);
+        producto.setFamilia(familia);
+        producto.setSubfamilia(subfamilia);
         producto.setMarca(findMarcaActiva(request.marcaId()));
         producto.setUnidadMedida(findUnidadMedidaActiva(request.unidadMedidaId()));
         producto.setStockMinimo(stockMinimo);
@@ -156,7 +178,9 @@ public class ProductoService {
     private Specification<ProductoEntity> buildSpecification(
             String texto,
             Boolean activo,
-            Long categoriaId,
+            Long tipoArticuloId,
+            Long familiaId,
+            Long subfamiliaId,
             Long marcaId,
             Long unidadMedidaId
     ) {
@@ -164,6 +188,9 @@ public class ProductoService {
         return (root, query, criteriaBuilder) -> {
             if (query != null && ProductoEntity.class.equals(query.getResultType())) {
                 root.fetch("categoria", jakarta.persistence.criteria.JoinType.LEFT);
+                root.fetch("tipoArticulo", jakarta.persistence.criteria.JoinType.INNER);
+                root.fetch("familia", jakarta.persistence.criteria.JoinType.INNER);
+                root.fetch("subfamilia", jakarta.persistence.criteria.JoinType.LEFT);
                 root.fetch("marca", jakarta.persistence.criteria.JoinType.LEFT);
                 root.fetch("unidadMedida", jakarta.persistence.criteria.JoinType.INNER);
                 query.distinct(true);
@@ -174,14 +201,21 @@ public class ProductoService {
                 String pattern = "%" + textoNormalizado.toLowerCase(Locale.ROOT) + "%";
                 predicates.add(criteriaBuilder.or(
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("codigo")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("nombre")), pattern)
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("nombre")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("descripcion")), pattern)
                 ));
             }
             if (activo != null) {
                 predicates.add(criteriaBuilder.equal(root.get("activo"), activo));
             }
-            if (categoriaId != null) {
-                predicates.add(criteriaBuilder.equal(root.get("categoria").get("id"), categoriaId));
+            if (tipoArticuloId != null) {
+                predicates.add(criteriaBuilder.equal(root.get("tipoArticulo").get("id"), tipoArticuloId));
+            }
+            if (familiaId != null) {
+                predicates.add(criteriaBuilder.equal(root.get("familia").get("id"), familiaId));
+            }
+            if (subfamiliaId != null) {
+                predicates.add(criteriaBuilder.equal(root.get("subfamilia").get("id"), subfamiliaId));
             }
             if (marcaId != null) {
                 predicates.add(criteriaBuilder.equal(root.get("marca").get("id"), marcaId));
@@ -193,16 +227,43 @@ public class ProductoService {
         };
     }
 
-    private CategoriaEntity findCategoriaActiva(Long id) {
+    private TipoArticuloEntity findTipoArticuloActivo(Long id) {
+        if (id == null) {
+            throw new BusinessException("El tipo de articulo es obligatorio");
+        }
+        TipoArticuloEntity tipoArticulo = tipoArticuloRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Tipo de articulo no encontrado"));
+        if (!tipoArticulo.isActivo()) {
+            throw new BusinessException("No se puede usar un tipo de articulo inactivo");
+        }
+        return tipoArticulo;
+    }
+
+    private FamiliaEntity findFamiliaActiva(Long id) {
+        if (id == null) {
+            throw new BusinessException("La familia es obligatoria");
+        }
+        FamiliaEntity familia = familiaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Familia no encontrada"));
+        if (!familia.isActivo()) {
+            throw new BusinessException("No se puede usar una familia inactiva");
+        }
+        return familia;
+    }
+
+    private SubfamiliaEntity findSubfamiliaActiva(Long id, FamiliaEntity familia) {
         if (id == null) {
             return null;
         }
-        CategoriaEntity categoria = categoriaRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Categoria no encontrada"));
-        if (!categoria.isActivo()) {
-            throw new BusinessException("No se puede usar una categoria inactiva");
+        SubfamiliaEntity subfamilia = subfamiliaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Subfamilia no encontrada"));
+        if (!subfamilia.isActivo()) {
+            throw new BusinessException("No se puede usar una subfamilia inactiva");
         }
-        return categoria;
+        if (!subfamilia.getFamilia().getId().equals(familia.getId())) {
+            throw new BusinessException("La subfamilia no pertenece a la familia seleccionada");
+        }
+        return subfamilia;
     }
 
     private MarcaEntity findMarcaActiva(Long id) {
@@ -218,6 +279,9 @@ public class ProductoService {
     }
 
     private UnidadMedidaEntity findUnidadMedidaActiva(Long id) {
+        if (id == null) {
+            throw new BusinessException("La unidad de medida es obligatoria");
+        }
         UnidadMedidaEntity unidad = unidadMedidaRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Unidad de medida no encontrada"));
         if (!unidad.isActivo()) {
@@ -227,7 +291,9 @@ public class ProductoService {
     }
 
     private ProductoResponse toResponse(ProductoEntity producto) {
-        CategoriaEntity categoria = producto.getCategoria();
+        TipoArticuloEntity tipoArticulo = producto.getTipoArticulo();
+        FamiliaEntity familia = producto.getFamilia();
+        SubfamiliaEntity subfamilia = producto.getSubfamilia();
         MarcaEntity marca = producto.getMarca();
         UnidadMedidaEntity unidad = producto.getUnidadMedida();
 
@@ -236,16 +302,17 @@ public class ProductoService {
                 producto.getCodigo(),
                 producto.getNombre(),
                 producto.getDescripcion(),
-                categoria == null ? null : categoria.getId(),
-                categoria == null ? null : categoria.getCodigo(),
-                categoria == null ? null : categoria.getNombre(),
+                tipoArticulo.getId(),
+                tipoArticulo.getCodigo(),
+                tipoArticulo.getNombre(),
+                familia.getId(),
+                familia.getNombre(),
+                subfamilia == null ? null : subfamilia.getId(),
+                subfamilia == null ? null : subfamilia.getNombre(),
                 marca == null ? null : marca.getId(),
-                marca == null ? null : marca.getCodigo(),
                 marca == null ? null : marca.getNombre(),
                 unidad.getId(),
-                unidad.getCodigo(),
                 unidad.getNombre(),
-                unidad.getAbreviatura(),
                 producto.getStockMinimo(),
                 producto.getStockMaximo(),
                 producto.getCostoReferencial(),

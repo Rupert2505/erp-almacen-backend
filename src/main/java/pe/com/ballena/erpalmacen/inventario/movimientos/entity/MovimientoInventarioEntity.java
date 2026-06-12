@@ -19,6 +19,8 @@ import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 import pe.com.ballena.erpalmacen.maestros.proveedores.entity.ProveedorEntity;
 import pe.com.ballena.erpalmacen.usuarios.entity.UsuarioEntity;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -60,6 +62,78 @@ public class MovimientoInventarioEntity {
 
     @Column(length = 500)
     private String observacion;
+
+    @Column(name = "motivo_movimiento", length = 150)
+    private String motivoMovimiento;
+
+    @Column(name = "orden_trabajo", length = 80)
+    private String ordenTrabajo;
+
+    @Column(name = "area_solicitante", length = 120)
+    private String areaSolicitante;
+
+    @Column(length = 120)
+    private String solicitante;
+
+    @Column(name = "responsable_entrega", length = 120)
+    private String responsableEntrega;
+
+    @Column(name = "responsable_recepcion", length = 120)
+    private String responsableRecepcion;
+
+    @Column(name = "guia_serie", length = 20)
+    private String guiaSerie;
+
+    @Column(name = "guia_numero", length = 50)
+    private String guiaNumero;
+
+    @Column(name = "guia_fecha")
+    private LocalDate guiaFecha;
+
+    @Column(name = "comprobante_tipo", length = 30)
+    private String comprobanteTipo;
+
+    @Column(name = "comprobante_serie", length = 20)
+    private String comprobanteSerie;
+
+    @Column(name = "comprobante_numero", length = 50)
+    private String comprobanteNumero;
+
+    @Column(name = "comprobante_fecha_emision")
+    private LocalDate comprobanteFechaEmision;
+
+    @Column(name = "orden_compra_numero", length = 50)
+    private String ordenCompraNumero;
+
+    @Column(name = "tipo_documento", length = 30)
+    private String tipoDocumento;
+
+    @Column(name = "serie_documento", length = 30)
+    private String serieDocumento;
+
+    @Column(name = "numero_documento", length = 50)
+    private String numeroDocumento;
+
+    @Column(name = "orden_compra", length = 100)
+    private String ordenCompra;
+
+    @Column(name = "fecha_pedido")
+    private LocalDate fechaPedido;
+
+    @Column(name = "fecha_recepcion")
+    private LocalDate fechaRecepcion;
+
+    @Column(precision = 18, scale = 6)
+    private BigDecimal flete;
+
+    @Column(precision = 18, scale = 6)
+    private BigDecimal movilidad;
+
+    @Column(name = "otros_gastos", precision = 18, scale = 6)
+    private BigDecimal otrosGastos;
+
+    @Column(name = "observacion_documentaria", columnDefinition = "TEXT")
+    private String observacionDocumentaria;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "usuario_id", nullable = false)
@@ -168,6 +242,198 @@ public class MovimientoInventarioEntity {
 
     public void setObservacion(String observacion) {
         this.observacion = observacion;
+    }
+
+    public String getMotivoMovimiento() {
+        return motivoMovimiento;
+    }
+
+    public void setMotivoMovimiento(String motivoMovimiento) {
+        this.motivoMovimiento = motivoMovimiento;
+    }
+
+    public String getOrdenTrabajo() {
+        return ordenTrabajo;
+    }
+
+    public void setOrdenTrabajo(String ordenTrabajo) {
+        this.ordenTrabajo = ordenTrabajo;
+    }
+
+    public String getAreaSolicitante() {
+        return areaSolicitante;
+    }
+
+    public void setAreaSolicitante(String areaSolicitante) {
+        this.areaSolicitante = areaSolicitante;
+    }
+
+    public String getSolicitante() {
+        return solicitante;
+    }
+
+    public void setSolicitante(String solicitante) {
+        this.solicitante = solicitante;
+    }
+
+    public String getResponsableEntrega() {
+        return responsableEntrega;
+    }
+
+    public void setResponsableEntrega(String responsableEntrega) {
+        this.responsableEntrega = responsableEntrega;
+    }
+
+    public String getResponsableRecepcion() {
+        return responsableRecepcion;
+    }
+
+    public void setResponsableRecepcion(String responsableRecepcion) {
+        this.responsableRecepcion = responsableRecepcion;
+    }
+
+    public String getGuiaSerie() {
+        return guiaSerie;
+    }
+
+    public void setGuiaSerie(String guiaSerie) {
+        this.guiaSerie = guiaSerie;
+    }
+
+    public String getGuiaNumero() {
+        return guiaNumero;
+    }
+
+    public void setGuiaNumero(String guiaNumero) {
+        this.guiaNumero = guiaNumero;
+    }
+
+    public LocalDate getGuiaFecha() {
+        return guiaFecha;
+    }
+
+    public void setGuiaFecha(LocalDate guiaFecha) {
+        this.guiaFecha = guiaFecha;
+    }
+
+    public String getComprobanteTipo() {
+        return comprobanteTipo;
+    }
+
+    public void setComprobanteTipo(String comprobanteTipo) {
+        this.comprobanteTipo = comprobanteTipo;
+    }
+
+    public String getComprobanteSerie() {
+        return comprobanteSerie;
+    }
+
+    public void setComprobanteSerie(String comprobanteSerie) {
+        this.comprobanteSerie = comprobanteSerie;
+    }
+
+    public String getComprobanteNumero() {
+        return comprobanteNumero;
+    }
+
+    public void setComprobanteNumero(String comprobanteNumero) {
+        this.comprobanteNumero = comprobanteNumero;
+    }
+
+    public LocalDate getComprobanteFechaEmision() {
+        return comprobanteFechaEmision;
+    }
+
+    public void setComprobanteFechaEmision(LocalDate comprobanteFechaEmision) {
+        this.comprobanteFechaEmision = comprobanteFechaEmision;
+    }
+
+    public String getOrdenCompraNumero() {
+        return ordenCompraNumero;
+    }
+
+    public void setOrdenCompraNumero(String ordenCompraNumero) {
+        this.ordenCompraNumero = ordenCompraNumero;
+    }
+
+    public String getTipoDocumento() {
+        return tipoDocumento;
+    }
+
+    public void setTipoDocumento(String tipoDocumento) {
+        this.tipoDocumento = tipoDocumento;
+    }
+
+    public String getSerieDocumento() {
+        return serieDocumento;
+    }
+
+    public void setSerieDocumento(String serieDocumento) {
+        this.serieDocumento = serieDocumento;
+    }
+
+    public String getNumeroDocumento() {
+        return numeroDocumento;
+    }
+
+    public void setNumeroDocumento(String numeroDocumento) {
+        this.numeroDocumento = numeroDocumento;
+    }
+
+    public String getOrdenCompra() {
+        return ordenCompra;
+    }
+
+    public void setOrdenCompra(String ordenCompra) {
+        this.ordenCompra = ordenCompra;
+    }
+
+    public LocalDate getFechaPedido() {
+        return fechaPedido;
+    }
+
+    public void setFechaPedido(LocalDate fechaPedido) {
+        this.fechaPedido = fechaPedido;
+    }
+
+    public LocalDate getFechaRecepcion() {
+        return fechaRecepcion;
+    }
+
+    public void setFechaRecepcion(LocalDate fechaRecepcion) {
+        this.fechaRecepcion = fechaRecepcion;
+    }
+
+    public BigDecimal getFlete() {
+        return flete;
+    }
+
+    public void setFlete(BigDecimal flete) {
+        this.flete = flete;
+    }
+
+    public BigDecimal getMovilidad() {
+        return movilidad;
+    }
+
+    public void setMovilidad(BigDecimal movilidad) {
+        this.movilidad = movilidad;
+    }
+
+    public BigDecimal getOtrosGastos() {
+        return otrosGastos;
+    }
+
+    public void setOtrosGastos(BigDecimal otrosGastos) {
+        this.otrosGastos = otrosGastos;
+    }
+
+    public String getObservacionDocumentaria() {
+        return observacionDocumentaria;
+    }
+
+    public void setObservacionDocumentaria(String observacionDocumentaria) {
+        this.observacionDocumentaria = observacionDocumentaria;
     }
 
     public UsuarioEntity getUsuario() {

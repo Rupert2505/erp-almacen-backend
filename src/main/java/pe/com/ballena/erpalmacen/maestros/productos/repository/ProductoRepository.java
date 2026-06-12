@@ -16,6 +16,9 @@ public interface ProductoRepository extends JpaRepository<ProductoEntity, Long>,
             select p
             from ProductoEntity p
             left join fetch p.categoria
+            join fetch p.tipoArticulo
+            join fetch p.familia
+            left join fetch p.subfamilia
             left join fetch p.marca
             join fetch p.unidadMedida
             where p.id = :id

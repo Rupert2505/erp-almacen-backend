@@ -44,10 +44,10 @@ public class MovimientoDetalleEntity {
     @Column(nullable = false, precision = 18, scale = 4)
     private BigDecimal cantidad;
 
-    @Column(name = "costo_unitario", precision = 18, scale = 4)
+    @Column(name = "costo_unitario", precision = 18, scale = 6)
     private BigDecimal costoUnitario;
 
-    @Column(name = "total_linea", precision = 18, scale = 4)
+    @Column(name = "total_linea", precision = 18, scale = 6)
     private BigDecimal totalLinea;
 
     @Column(length = 255)

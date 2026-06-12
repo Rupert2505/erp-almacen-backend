@@ -6,6 +6,7 @@ public record ProductoBajoMinimoReporteResponse(
         Long productoId,
         String productoCodigo,
         String productoNombre,
+        String familiaNombre,
         String categoriaNombre,
         Long almacenId,
         String almacenNombre,

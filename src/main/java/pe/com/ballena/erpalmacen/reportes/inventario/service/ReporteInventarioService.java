@@ -407,6 +407,7 @@ public class ReporteInventarioService {
                 producto.getId(),
                 producto.getCodigo(),
                 producto.getNombre(),
+                producto.getFamilia().getNombre(),
                 categoria == null ? null : categoria.getNombre(),
                 almacen.getId(),
                 almacen.getNombre(),

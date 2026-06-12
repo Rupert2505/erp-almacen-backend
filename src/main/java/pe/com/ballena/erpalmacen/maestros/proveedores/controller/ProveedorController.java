@@ -34,10 +34,18 @@ public class ProveedorController {
     @PreAuthorize("hasAuthority('PROVEEDOR_VER') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Page<ProveedorResponse>>> listar(
             @RequestParam(required = false) String texto,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String nombre,
+            @RequestParam(required = false) String term,
             @RequestParam(required = false) Boolean activo,
             Pageable pageable
     ) {
-        return ResponseEntity.ok(ApiResponse.ok(proveedorService.listar(texto, activo, pageable)));
+        return ResponseEntity.ok(ApiResponse.ok(proveedorService.listar(
+                firstNonBlank(texto, search, q, nombre, term),
+                activo,
+                pageable
+        )));
     }
 
     @GetMapping("/{id}")
@@ -71,5 +79,14 @@ public class ProveedorController {
     @PreAuthorize("hasAuthority('PROVEEDOR_CREAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<ProveedorResponse>> activar(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok("Proveedor activado correctamente", proveedorService.activar(id)));
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }
