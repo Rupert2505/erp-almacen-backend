@@ -325,6 +325,89 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
+    void entradaCompraSinAlmacenDestinoFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearRequestOperativo(
+                TipoMovimientoInventario.ENTRADA_COMPRA,
+                data,
+                false,
+                data.proveedor().getId(),
+                null,
+                null,
+                "Entrada compra",
+                null,
+                new BigDecimal("1.0000"),
+                new BigDecimal("1.000000")
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("almacen destino");
+    }
+
+    @Test
+    void entradaCompraSinDetalleFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = new MovimientoInventarioCreateRequest(
+                TipoMovimientoInventario.ENTRADA_COMPRA,
+                LocalDateTime.now(),
+                data.proveedor().getId(),
+                null,
+                null,
+                data.almacenDestino().getId(),
+                null,
+                "DOC-SIN-DETALLE",
+                "Entrada compra sin detalle",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                "FACTURA",
+                "F001",
+                "000001",
+                LocalDate.now(),
+                "OC-SIN-DETALLE",
+                null,
+                null,
+                null,
+                null,
+                LocalDate.now(),
+                LocalDate.now(),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                null,
+                List.of()
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("detalle");
+    }
+
+    @Test
+    void entradaCompraSinCostoUnitarioFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearEntradaCompraRequest(
+                data,
+                false,
+                "DOC-SIN-COSTO",
+                new BigDecimal("1.0000"),
+                null
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("costo unitario");
+    }
+
+    @Test
     void entradaAjusteSinMotivoFalla() {
         TestData data = crearDatosBase();
         MovimientoInventarioCreateRequest request = crearRequestOperativo(
@@ -343,6 +426,27 @@ class MovimientoInventarioServiceTest {
         assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("motivo");
+    }
+
+    @Test
+    void entradaAjusteSinObservacionFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearRequestOperativo(
+                TipoMovimientoInventario.ENTRADA_AJUSTE,
+                data,
+                false,
+                null,
+                null,
+                data.almacenDestino().getId(),
+                null,
+                "Regularizacion",
+                new BigDecimal("1.0000"),
+                null
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("observacion");
     }
 
     @Test
@@ -377,6 +481,97 @@ class MovimientoInventarioServiceTest {
                 data.almacenOrigen().getId(),
                 null,
                 "Observacion requerida",
+                null,
+                new BigDecimal("1.0000"),
+                null
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("motivo");
+    }
+
+    @Test
+    void salidaVentaSinAlmacenOrigenFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearRequestOperativo(
+                TipoMovimientoInventario.SALIDA_VENTA,
+                data,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                new BigDecimal("1.0000"),
+                null
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("almacen origen");
+    }
+
+    @Test
+    void salidaAjusteConfirmadaDisminuyeStockYGeneraKardex() {
+        TestData data = crearDatosBase();
+        confirmarEntrada(data, new BigDecimal("9.0000"));
+        MovimientoInventarioCreateRequest request = crearRequestOperativo(
+                TipoMovimientoInventario.SALIDA_AJUSTE,
+                data,
+                true,
+                null,
+                data.almacenOrigen().getId(),
+                null,
+                "Salida ajuste validada",
+                "Regularizacion negativa",
+                new BigDecimal("4.0000"),
+                null
+        );
+
+        var response = movimientoInventarioService.crearMovimiento(request, authentication());
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.CONFIRMADO);
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("5.0000");
+        assertThat(kardexRepository.findByMovimientoId(response.id())).hasSize(1);
+    }
+
+    @Test
+    void ajustePositivoSinObservacionFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearRequestOperativo(
+                TipoMovimientoInventario.AJUSTE_POSITIVO,
+                data,
+                false,
+                null,
+                null,
+                data.almacenDestino().getId(),
+                null,
+                "Sobrante",
+                new BigDecimal("1.0000"),
+                null
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("observacion");
+    }
+
+    @Test
+    void ajusteNegativoSinMotivoFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearRequestOperativo(
+                TipoMovimientoInventario.AJUSTE_NEGATIVO,
+                data,
+                false,
+                null,
+                data.almacenOrigen().getId(),
+                null,
+                "Ajuste negativo",
                 null,
                 new BigDecimal("1.0000"),
                 null
