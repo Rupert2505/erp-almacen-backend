@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -61,6 +63,34 @@ class SecurityEndpointIntegrationTest {
 
         mockMvc.perform(get("/api/reportes/inventario/resumen")
                         .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void cancelarMovimientoSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(post("/api/inventario/movimientos/1/cancelar")
+                        .contentType("application/json")
+                        .content("{\"motivoCancelacion\":\"Error\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void cancelarMovimientoPatchSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(patch("/api/inventario/movimientos/1/cancelar")
+                        .contentType("application/json")
+                        .content("{\"motivo\":\"Error\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void cancelarMovimientoUsuarioSinPermisoDevuelve403() throws Exception {
+        UsuarioEntity usuario = crearUsuario("consulta_cancelar", true, "CONSULTA");
+        String token = jwtService.generateToken(usuario.getUsername(), List.of("CONSULTA"), List.of());
+
+        mockMvc.perform(post("/api/inventario/movimientos/1/cancelar")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content("{\"motivoCancelacion\":\"Error\"}"))
                 .andExpect(status().isForbidden());
     }
 

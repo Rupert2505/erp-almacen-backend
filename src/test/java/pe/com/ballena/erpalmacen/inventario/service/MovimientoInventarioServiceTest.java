@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.kardex.repository.KardexRepository;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalleEntity;
@@ -814,7 +815,7 @@ class MovimientoInventarioServiceTest {
                 PageRequest.of(0, 10)
         );
         var proveedores = proveedorService.listar(
-                data.proveedor().getRazonSocial().substring(0, 12),
+                data.proveedor().getNumeroDocumento(),
                 null,
                 PageRequest.of(0, 10)
         );
@@ -922,6 +923,158 @@ class MovimientoInventarioServiceTest {
         assertThatThrownBy(() -> movimientoInventarioService.confirmarMovimiento(movimiento.getId()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("ya fue confirmado");
+    }
+
+    @Test
+    void cancelarMovimientoBorradorCambiaEstadoSinAfectarStockNiKardex() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearEntradaCompraRequest(
+                data,
+                false,
+                "DOC-CANCELAR-BORRADOR",
+                new BigDecimal("5.0000"),
+                new BigDecimal("2.000000")
+        );
+        var borrador = movimientoInventarioService.crearMovimiento(request, authentication());
+
+        var cancelado = movimientoInventarioService.cancelarMovimiento(
+                borrador.id(),
+                new MovimientoCancelacionRequest("Error de digitacion"),
+                authentication()
+        );
+
+        assertThat(cancelado.estado()).isEqualTo(EstadoMovimientoInventario.CANCELADO);
+        assertThat(cancelado.motivoCancelacion()).isEqualTo("Error de digitacion");
+        assertThat(cancelado.canceladoPor()).isEqualTo("admin");
+        assertThat(cancelado.canceladoEn()).isNotNull();
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        )).isEmpty();
+        assertThat(kardexRepository.findByMovimientoId(borrador.id())).isEmpty();
+    }
+
+    @Test
+    void cancelarSinMotivoFalla() {
+        TestData data = crearDatosBase();
+        var borrador = movimientoInventarioService.crearMovimiento(
+                crearEntradaCompraRequest(data, false, "DOC-CANCELAR-SIN-MOTIVO", new BigDecimal("1.0000"), new BigDecimal("1.000000")),
+                authentication()
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.cancelarMovimiento(
+                borrador.id(),
+                new MovimientoCancelacionRequest("   "),
+                authentication()
+        )).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("motivo de cancelacion");
+    }
+
+    @Test
+    void cancelarMovimientoConfirmadoFallaYNoCambiaStock() {
+        TestData data = crearDatosBase();
+        var confirmado = movimientoInventarioService.crearMovimiento(
+                crearEntradaCompraRequest(data, true, "DOC-CANCELAR-CONFIRMADO", new BigDecimal("5.0000"), new BigDecimal("2.000000")),
+                authentication()
+        );
+        var stockAntes = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow().getCantidadActual();
+
+        assertThatThrownBy(() -> movimientoInventarioService.cancelarMovimiento(
+                confirmado.id(),
+                new MovimientoCancelacionRequest("No procede"),
+                authentication()
+        )).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Solo se pueden cancelar movimientos en estado BORRADOR");
+
+        var stockDespues = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow().getCantidadActual();
+        assertThat(stockDespues).isEqualByComparingTo(stockAntes);
+    }
+
+    @Test
+    void cancelarMovimientoAnuladoFalla() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("5.0000"));
+        movimientoInventarioService.anularMovimiento(entrada.getId(), "Error operativo");
+
+        assertThatThrownBy(() -> movimientoInventarioService.cancelarMovimiento(
+                entrada.getId(),
+                new MovimientoCancelacionRequest("No procede"),
+                authentication()
+        )).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Solo se pueden cancelar movimientos en estado BORRADOR");
+    }
+
+    @Test
+    void confirmarMovimientoCanceladoFallaSinStockNiKardex() {
+        TestData data = crearDatosBase();
+        var borrador = movimientoInventarioService.crearMovimiento(
+                crearEntradaCompraRequest(data, false, "DOC-CONFIRMAR-CANCELADO", new BigDecimal("5.0000"), new BigDecimal("2.000000")),
+                authentication()
+        );
+        movimientoInventarioService.cancelarMovimiento(
+                borrador.id(),
+                new MovimientoCancelacionRequest("Cancelar antes de confirmar"),
+                authentication()
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.confirmarMovimiento(borrador.id()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("No se puede confirmar un movimiento cancelado");
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        )).isEmpty();
+        assertThat(kardexRepository.findByMovimientoId(borrador.id())).isEmpty();
+    }
+
+    @Test
+    void anularMovimientoCanceladoFalla() {
+        TestData data = crearDatosBase();
+        var borrador = movimientoInventarioService.crearMovimiento(
+                crearEntradaCompraRequest(data, false, "DOC-ANULAR-CANCELADO", new BigDecimal("5.0000"), new BigDecimal("2.000000")),
+                authentication()
+        );
+        movimientoInventarioService.cancelarMovimiento(
+                borrador.id(),
+                new MovimientoCancelacionRequest("Cancelar antes de anular"),
+                authentication()
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(borrador.id(), "No procede"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("No se puede anular un movimiento cancelado");
+    }
+
+    @Test
+    void listarYFiltrarMovimientosCanceladosFunciona() {
+        TestData data = crearDatosBase();
+        var borrador = movimientoInventarioService.crearMovimiento(
+                crearEntradaCompraRequest(data, false, "DOC-LISTAR-CANCELADO", new BigDecimal("1.0000"), new BigDecimal("1.000000")),
+                authentication()
+        );
+        movimientoInventarioService.cancelarMovimiento(
+                borrador.id(),
+                new MovimientoCancelacionRequest("Cancelar para listado"),
+                authentication()
+        );
+
+        var listado = movimientoInventarioService.listar(
+                null,
+                EstadoMovimientoInventario.CANCELADO,
+                null,
+                null,
+                "DOC-LISTAR-CANCELADO",
+                PageRequest.of(0, 10)
+        );
+
+        assertThat(listado.getContent()).anyMatch(m -> m.id().equals(borrador.id())
+                && m.estado() == EstadoMovimientoInventario.CANCELADO);
     }
 
     @Test

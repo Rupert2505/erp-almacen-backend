@@ -12,11 +12,13 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioResponse;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.service.MovimientoInventarioService;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
@@ -88,6 +90,25 @@ public class MovimientoInventarioController {
         return ResponseEntity.ok(ApiResponse.ok(
                 "Movimiento confirmado correctamente",
                 movimientoInventarioService.confirmarMovimiento(id, authentication)
+        ));
+    }
+
+    @RequestMapping(path = "/{id}/cancelar", method = {RequestMethod.POST, RequestMethod.PATCH})
+    @PreAuthorize("""
+            hasAuthority('INVENTARIO_ENTRADA')
+            or hasAuthority('INVENTARIO_SALIDA')
+            or hasAuthority('INVENTARIO_TRANSFERENCIA')
+            or hasAuthority('INVENTARIO_AJUSTE')
+            or hasRole('ADMIN')
+            """)
+    public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> cancelar(
+            @PathVariable Long id,
+            @Valid @RequestBody MovimientoCancelacionRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                "Movimiento cancelado correctamente",
+                movimientoInventarioService.cancelarMovimiento(id, request, authentication)
         ));
     }
 

@@ -145,6 +145,15 @@ public class MovimientoInventarioEntity {
     @Column(name = "anulado_en")
     private LocalDateTime anuladoEn;
 
+    @Column(name = "motivo_cancelacion", columnDefinition = "TEXT")
+    private String motivoCancelacion;
+
+    @Column(name = "cancelado_por", length = 120)
+    private String canceladoPor;
+
+    @Column(name = "cancelado_en")
+    private LocalDateTime canceladoEn;
+
     @Column(name = "creado_en", nullable = false)
     private LocalDateTime creadoEn;
 
@@ -458,6 +467,30 @@ public class MovimientoInventarioEntity {
 
     public void setAnuladoEn(LocalDateTime anuladoEn) {
         this.anuladoEn = anuladoEn;
+    }
+
+    public String getMotivoCancelacion() {
+        return motivoCancelacion;
+    }
+
+    public void setMotivoCancelacion(String motivoCancelacion) {
+        this.motivoCancelacion = motivoCancelacion;
+    }
+
+    public String getCanceladoPor() {
+        return canceladoPor;
+    }
+
+    public void setCanceladoPor(String canceladoPor) {
+        this.canceladoPor = canceladoPor;
+    }
+
+    public LocalDateTime getCanceladoEn() {
+        return canceladoEn;
+    }
+
+    public void setCanceladoEn(LocalDateTime canceladoEn) {
+        this.canceladoEn = canceladoEn;
     }
 
     public LocalDateTime getCreadoEn() {

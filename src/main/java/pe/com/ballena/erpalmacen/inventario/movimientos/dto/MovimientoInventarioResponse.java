@@ -55,6 +55,9 @@ public record MovimientoInventarioResponse(
         String username,
         LocalDateTime confirmadoEn,
         LocalDateTime anuladoEn,
+        String motivoCancelacion,
+        String canceladoPor,
+        LocalDateTime canceladoEn,
         LocalDateTime creadoEn,
         LocalDateTime actualizadoEn,
         List<MovimientoDetalleResponse> detalles

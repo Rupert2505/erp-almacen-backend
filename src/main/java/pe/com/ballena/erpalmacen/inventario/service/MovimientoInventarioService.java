@@ -14,6 +14,7 @@ import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.repository.UbicacionAlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleResponse;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
@@ -205,6 +206,29 @@ public class MovimientoInventarioService {
         movimiento.setEstado(EstadoMovimientoInventario.CONFIRMADO);
         movimiento.setConfirmadoEn(LocalDateTime.now());
         return movimiento;
+    }
+
+    @Transactional
+    public MovimientoInventarioResponse cancelarMovimiento(
+            Long movimientoId,
+            MovimientoCancelacionRequest request,
+            Authentication authentication
+    ) {
+        validarPermisoCancelacion(authentication);
+        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+
+        validarEstadoCancelable(movimiento);
+        String motivoLimpio = clean(request.motivoCancelacion());
+        if (motivoLimpio == null || motivoLimpio.isBlank()) {
+            throw new BusinessException("El motivo de cancelacion es obligatorio");
+        }
+
+        movimiento.setEstado(EstadoMovimientoInventario.CANCELADO);
+        movimiento.setMotivoCancelacion(motivoLimpio);
+        movimiento.setCanceladoPor(authentication.getName());
+        movimiento.setCanceladoEn(LocalDateTime.now());
+        return toResponse(movimiento);
     }
 
     @Transactional
@@ -754,14 +778,26 @@ public class MovimientoInventarioService {
         if (movimiento.getEstado() == EstadoMovimientoInventario.ANULADO) {
             throw new BusinessException("No se puede confirmar un movimiento anulado");
         }
+        if (movimiento.getEstado() == EstadoMovimientoInventario.CANCELADO) {
+            throw new BusinessException("No se puede confirmar un movimiento cancelado");
+        }
         if (movimiento.getEstado() != EstadoMovimientoInventario.BORRADOR) {
             throw new BusinessException("Solo se pueden confirmar movimientos en estado BORRADOR");
+        }
+    }
+
+    private void validarEstadoCancelable(MovimientoInventarioEntity movimiento) {
+        if (movimiento.getEstado() != EstadoMovimientoInventario.BORRADOR) {
+            throw new BusinessException("Solo se pueden cancelar movimientos en estado BORRADOR");
         }
     }
 
     private void validarEstadoAnulable(MovimientoInventarioEntity movimiento) {
         if (movimiento.getEstado() == EstadoMovimientoInventario.BORRADOR) {
             throw new BusinessException("No se puede anular un movimiento en estado BORRADOR");
+        }
+        if (movimiento.getEstado() == EstadoMovimientoInventario.CANCELADO) {
+            throw new BusinessException("No se puede anular un movimiento cancelado");
         }
         if (movimiento.getEstado() == EstadoMovimientoInventario.ANULADO) {
             throw new BusinessException("El movimiento ya fue anulado");
@@ -917,6 +953,18 @@ public class MovimientoInventarioService {
         throw new BusinessException("No tiene permisos para anular movimientos");
     }
 
+    private void validarPermisoCancelacion(Authentication authentication) {
+        Set<String> authorities = obtenerAuthorities(authentication);
+        if (authorities.contains(ROLE_ADMIN)
+                || authorities.contains(INVENTARIO_AJUSTE)
+                || authorities.contains(INVENTARIO_ENTRADA)
+                || authorities.contains(INVENTARIO_SALIDA)
+                || authorities.contains(INVENTARIO_TRANSFERENCIA)) {
+            return;
+        }
+        throw new BusinessException("No tiene permisos para cancelar movimientos");
+    }
+
     private Set<String> obtenerAuthorities(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
             throw new BusinessException("Usuario no autenticado");
@@ -1064,6 +1112,9 @@ public class MovimientoInventarioService {
                 usuario == null ? null : usuario.getUsername(),
                 movimiento.getConfirmadoEn(),
                 movimiento.getAnuladoEn(),
+                movimiento.getMotivoCancelacion(),
+                movimiento.getCanceladoPor(),
+                movimiento.getCanceladoEn(),
                 movimiento.getCreadoEn(),
                 movimiento.getActualizadoEn(),
                 detalles
