@@ -56,8 +56,8 @@ public class TipoArticuloService {
 
         TipoArticuloEntity tipoArticulo = new TipoArticuloEntity();
         tipoArticulo.setCodigo(codigo);
-        tipoArticulo.setNombre(nombre);
-        tipoArticulo.setDescripcion(clean(request.descripcion()));
+        tipoArticulo.setNombre(normalizeText(nombre));
+        tipoArticulo.setDescripcion(normalizeText(request.descripcion()));
         tipoArticulo.setActivo(true);
         return toResponse(tipoArticuloRepository.save(tipoArticulo));
     }
@@ -70,8 +70,8 @@ public class TipoArticuloService {
         validateUnique(codigo, nombre, id);
 
         tipoArticulo.setCodigo(codigo);
-        tipoArticulo.setNombre(nombre);
-        tipoArticulo.setDescripcion(clean(request.descripcion()));
+        tipoArticulo.setNombre(normalizeText(nombre));
+        tipoArticulo.setDescripcion(normalizeText(request.descripcion()));
         if (request.activo() != null) {
             tipoArticulo.setActivo(request.activo());
         }
@@ -127,6 +127,11 @@ public class TipoArticuloService {
 
     private String normalizeCode(String value) {
         return cleanRequired(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {

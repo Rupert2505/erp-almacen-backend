@@ -8,7 +8,6 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
 public record ProductoCreateRequest(
-        @NotBlank(message = "El codigo es obligatorio")
         @Size(max = 50, message = "El codigo no debe superar 50 caracteres")
         String codigo,
 

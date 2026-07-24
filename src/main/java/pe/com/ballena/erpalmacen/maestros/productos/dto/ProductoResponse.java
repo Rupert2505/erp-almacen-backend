@@ -12,6 +12,7 @@ public record ProductoResponse(
         String tipoArticuloCodigo,
         String tipoArticuloNombre,
         Long familiaId,
+        String familiaPrefijo,
         String familiaNombre,
         Long subfamiliaId,
         String subfamiliaNombre,

@@ -796,6 +796,17 @@ class MovimientoInventarioServiceTest {
         assertThat(page.getContent()).isNotEmpty();
         assertThat(page.getContent().get(0).id()).isEqualTo(segundo.id());
         assertThat(segundo.id()).isGreaterThan(primero.id());
+
+        var movimientosPorCodigoProducto = movimientoInventarioService.listar(
+                null,
+                null,
+                null,
+                null,
+                data.producto().getCodigo(),
+                PageRequest.of(0, 10)
+        );
+        assertThat(movimientosPorCodigoProducto.getContent())
+                .anyMatch(movimiento -> movimiento.id().equals(primero.id()));
     }
 
     @Test
@@ -805,7 +816,7 @@ class MovimientoInventarioServiceTest {
         productoRepository.save(data.producto());
 
         var productos = productoService.listar(
-                "autocomplete",
+                data.producto().getCodigo(),
                 null,
                 null,
                 null,
@@ -1619,6 +1630,7 @@ class MovimientoInventarioServiceTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         FamiliaEntity familia = new FamiliaEntity();
         familia.setNombre("Familia Test " + suffix);
+        familia.setPrefijo("FT" + suffix.substring(0, 8));
         familia.setActivo(true);
         return familiaRepository.save(familia);
     }

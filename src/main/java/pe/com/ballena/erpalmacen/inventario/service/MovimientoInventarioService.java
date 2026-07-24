@@ -180,20 +180,21 @@ public class MovimientoInventarioService {
 
     @Transactional
     public MovimientoInventarioResponse confirmarMovimiento(Long movimientoId, Authentication authentication) {
-        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        MovimientoInventarioEntity movimiento = obtenerMovimientoParaActualizar(movimientoId);
         validarPermisoPorTipo(authentication, movimiento.getTipoMovimiento());
-        MovimientoInventarioEntity confirmado = confirmarMovimiento(movimientoId);
+        MovimientoInventarioEntity confirmado = confirmarMovimiento(movimiento);
         return toResponse(confirmado);
     }
 
     @Transactional
     public MovimientoInventarioEntity confirmarMovimiento(Long movimientoId) {
-        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        MovimientoInventarioEntity movimiento = obtenerMovimientoParaActualizar(movimientoId);
+        return confirmarMovimiento(movimiento);
+    }
 
+    private MovimientoInventarioEntity confirmarMovimiento(MovimientoInventarioEntity movimiento) {
         validarEstadoConfirmable(movimiento);
-        List<MovimientoDetalleEntity> detalles = movimientoDetalleRepository.findByMovimientoIdOrderByIdAsc(movimientoId);
+        List<MovimientoDetalleEntity> detalles = movimientoDetalleRepository.findByMovimientoIdOrderByIdAsc(movimiento.getId());
         if (detalles.isEmpty()) {
             throw new BusinessException("El movimiento debe tener al menos un detalle");
         }
@@ -215,8 +216,7 @@ public class MovimientoInventarioService {
             Authentication authentication
     ) {
         validarPermisoCancelacion(authentication);
-        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        MovimientoInventarioEntity movimiento = obtenerMovimientoParaActualizar(movimientoId);
 
         validarEstadoCancelable(movimiento);
         String motivoLimpio = clean(request.motivoCancelacion());
@@ -238,17 +238,20 @@ public class MovimientoInventarioService {
             Authentication authentication
     ) {
         validarPermisoAnulacion(authentication);
-        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        MovimientoInventarioEntity movimiento = obtenerMovimientoParaActualizar(movimientoId);
         MovimientoInventarioEntity anulado = anularMovimiento(movimiento, request.motivo());
         return toResponse(anulado);
     }
 
     @Transactional
     public MovimientoInventarioEntity anularMovimiento(Long movimientoId, String motivo) {
-        MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
-                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
+        MovimientoInventarioEntity movimiento = obtenerMovimientoParaActualizar(movimientoId);
         return anularMovimiento(movimiento, motivo);
+    }
+
+    private MovimientoInventarioEntity obtenerMovimientoParaActualizar(Long movimientoId) {
+        return movimientoInventarioRepository.findByIdForUpdate(movimientoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
     }
 
     private MovimientoInventarioEntity anularMovimiento(MovimientoInventarioEntity movimiento, String motivo) {
@@ -1012,6 +1015,16 @@ public class MovimientoInventarioService {
             }
             if (textoNormalizado != null) {
                 String pattern = "%" + textoNormalizado.toLowerCase(Locale.ROOT) + "%";
+                jakarta.persistence.criteria.Subquery<Long> detalleSubquery = query.subquery(Long.class);
+                jakarta.persistence.criteria.Root<MovimientoDetalleEntity> detalleRoot = detalleSubquery.from(MovimientoDetalleEntity.class);
+                detalleSubquery.select(detalleRoot.get("movimiento").get("id"))
+                        .where(
+                                criteriaBuilder.equal(detalleRoot.get("movimiento").get("id"), root.get("id")),
+                                criteriaBuilder.or(
+                                        criteriaBuilder.like(criteriaBuilder.lower(detalleRoot.get("producto").get("codigo")), pattern),
+                                        criteriaBuilder.like(criteriaBuilder.lower(detalleRoot.get("producto").get("nombre")), pattern)
+                                )
+                        );
                 predicates.add(criteriaBuilder.or(
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("numero")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("documentoReferencia")), pattern),
@@ -1032,7 +1045,8 @@ public class MovimientoInventarioService {
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("numeroDocumento")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("ordenCompra")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("observacionDocumentaria")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("observacion")), pattern)
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("observacion")), pattern),
+                        criteriaBuilder.exists(detalleSubquery)
                 ));
             }
             return criteriaBuilder.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));

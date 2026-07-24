@@ -26,17 +26,25 @@ public interface FamiliaRepository extends JpaRepository<FamiliaEntity, Long> {
             """)
     boolean existsByNombreIgnoreCaseAndIdNot(@Param("nombre") String nombre, @Param("id") Long id);
 
+    boolean existsByPrefijo(String prefijo);
+
+    boolean existsByPrefijoAndIdNot(String prefijo, Long id);
+
     @Query("""
             select f
             from FamiliaEntity f
             where lower(f.nombre) like lower(concat('%', :texto, '%'))
+               or lower(f.prefijo) like lower(concat('%', :texto, '%'))
             """)
     Page<FamiliaEntity> buscarPorTexto(@Param("texto") String texto, Pageable pageable);
 
     @Query("""
             select f
             from FamiliaEntity f
-            where lower(f.nombre) like lower(concat('%', :texto, '%'))
+            where (
+                    lower(f.nombre) like lower(concat('%', :texto, '%'))
+                 or lower(f.prefijo) like lower(concat('%', :texto, '%'))
+            )
               and f.activo = :activo
             """)
     Page<FamiliaEntity> buscarPorTextoYActivo(

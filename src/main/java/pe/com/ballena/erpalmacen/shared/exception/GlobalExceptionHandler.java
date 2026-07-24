@@ -2,8 +2,12 @@ package pe.com.ballena.erpalmacen.shared.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -18,6 +22,11 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final String CONCURRENCY_CONFLICT_MESSAGE =
+            "El registro fue modificado por otro usuario. Actualice la informacion e intente nuevamente.";
+    private static final String DATA_CONFLICT_MESSAGE =
+            "La operacion no pudo completarse por un conflicto de datos. Actualice la informacion e intente nuevamente.";
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleResourceNotFound(
@@ -91,6 +100,26 @@ public class GlobalExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.METHOD_NOT_ALLOWED, "Metodo HTTP no permitido para este endpoint", request);
+    }
+
+    @ExceptionHandler({
+            ObjectOptimisticLockingFailureException.class,
+            PessimisticLockingFailureException.class,
+            CannotAcquireLockException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleConcurrencyConflict(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, CONCURRENCY_CONFLICT_MESSAGE, request);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, DATA_CONFLICT_MESSAGE, request);
     }
 
     @ExceptionHandler(AuthenticationException.class)

@@ -473,6 +473,7 @@ class InventarioConsultaReporteServiceTest {
     private FamiliaEntity crearFamilia(String suffix) {
         FamiliaEntity familia = new FamiliaEntity();
         familia.setNombre("Familia " + suffix);
+        familia.setPrefijo("FI" + suffix.substring(0, 8));
         familia.setActivo(true);
         return familiaRepository.save(familia);
     }

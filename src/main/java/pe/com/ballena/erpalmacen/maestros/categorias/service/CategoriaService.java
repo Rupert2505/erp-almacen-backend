@@ -52,8 +52,8 @@ public class CategoriaService {
 
         CategoriaEntity categoria = new CategoriaEntity();
         categoria.setCodigo(codigo);
-        categoria.setNombre(clean(request.nombre()));
-        categoria.setDescripcion(clean(request.descripcion()));
+        categoria.setNombre(normalizeText(request.nombre()));
+        categoria.setDescripcion(normalizeText(request.descripcion()));
         categoria.setActivo(true);
         return toResponse(categoriaRepository.save(categoria));
     }
@@ -67,8 +67,8 @@ public class CategoriaService {
         }
 
         categoria.setCodigo(codigo);
-        categoria.setNombre(clean(request.nombre()));
-        categoria.setDescripcion(clean(request.descripcion()));
+        categoria.setNombre(normalizeText(request.nombre()));
+        categoria.setDescripcion(normalizeText(request.descripcion()));
         return toResponse(categoria);
     }
 
@@ -105,6 +105,11 @@ public class CategoriaService {
 
     private String normalizeCode(String value) {
         return clean(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {

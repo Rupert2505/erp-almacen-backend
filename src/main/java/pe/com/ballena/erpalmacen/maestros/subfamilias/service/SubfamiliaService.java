@@ -14,6 +14,8 @@ import pe.com.ballena.erpalmacen.maestros.subfamilias.repository.SubfamiliaRepos
 import pe.com.ballena.erpalmacen.shared.exception.BusinessException;
 import pe.com.ballena.erpalmacen.shared.exception.ResourceNotFoundException;
 
+import java.util.Locale;
+
 @Service
 public class SubfamiliaService {
 
@@ -65,8 +67,8 @@ public class SubfamiliaService {
 
         SubfamiliaEntity subfamilia = new SubfamiliaEntity();
         subfamilia.setFamilia(familia);
-        subfamilia.setNombre(nombre);
-        subfamilia.setDescripcion(clean(request.descripcion()));
+        subfamilia.setNombre(normalizeText(nombre));
+        subfamilia.setDescripcion(normalizeText(request.descripcion()));
         subfamilia.setActivo(true);
         return toResponse(subfamiliaRepository.save(subfamilia));
     }
@@ -81,8 +83,8 @@ public class SubfamiliaService {
         }
 
         subfamilia.setFamilia(familia);
-        subfamilia.setNombre(nombre);
-        subfamilia.setDescripcion(clean(request.descripcion()));
+        subfamilia.setNombre(normalizeText(nombre));
+        subfamilia.setDescripcion(normalizeText(request.descripcion()));
         if (request.activo() != null) {
             subfamilia.setActivo(request.activo());
         }
@@ -138,6 +140,11 @@ public class SubfamiliaService {
 
     private String cleanRequired(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String clean(String value) {

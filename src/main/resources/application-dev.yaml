@@ -4,6 +4,15 @@ spring:
     username: erp_user
     password: Ballena2023$$
     driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: erp-almacen-dev-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      validation-timeout: 5000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 0
   jpa:
     open-in-view: false
     hibernate:

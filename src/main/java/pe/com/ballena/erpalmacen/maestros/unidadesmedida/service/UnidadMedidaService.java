@@ -52,7 +52,7 @@ public class UnidadMedidaService {
 
         UnidadMedidaEntity unidad = new UnidadMedidaEntity();
         unidad.setCodigo(codigo);
-        unidad.setNombre(clean(request.nombre()));
+        unidad.setNombre(normalizeText(request.nombre()));
         unidad.setAbreviatura(normalizeCode(request.abreviatura()));
         unidad.setActivo(true);
         return toResponse(unidadMedidaRepository.save(unidad));
@@ -67,7 +67,7 @@ public class UnidadMedidaService {
         }
 
         unidad.setCodigo(codigo);
-        unidad.setNombre(clean(request.nombre()));
+        unidad.setNombre(normalizeText(request.nombre()));
         unidad.setAbreviatura(normalizeCode(request.abreviatura()));
         return toResponse(unidad);
     }
@@ -105,6 +105,11 @@ public class UnidadMedidaService {
 
     private String normalizeCode(String value) {
         return clean(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {

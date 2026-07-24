@@ -45,7 +45,7 @@ public class ProveedorService {
 
     @Transactional
     public ProveedorResponse crear(ProveedorCreateRequest request) {
-        String numeroDocumento = cleanRequired(request.numeroDocumento());
+        String numeroDocumento = normalizeCode(request.numeroDocumento());
         if (proveedorRepository.existsByNumeroDocumento(numeroDocumento)) {
             throw new BusinessException("Ya existe un proveedor con el numero de documento indicado");
         }
@@ -53,11 +53,11 @@ public class ProveedorService {
         ProveedorEntity proveedor = new ProveedorEntity();
         proveedor.setTipoDocumento(normalizeCode(request.tipoDocumento()));
         proveedor.setNumeroDocumento(numeroDocumento);
-        proveedor.setRazonSocial(cleanRequired(request.razonSocial()));
-        proveedor.setNombreComercial(clean(request.nombreComercial()));
-        proveedor.setDireccion(clean(request.direccion()));
+        proveedor.setRazonSocial(normalizeText(request.razonSocial()));
+        proveedor.setNombreComercial(normalizeText(request.nombreComercial()));
+        proveedor.setDireccion(normalizeText(request.direccion()));
         proveedor.setTelefono(clean(request.telefono()));
-        proveedor.setEmail(clean(request.email()));
+        proveedor.setEmail(normalizeEmail(request.email()));
         proveedor.setActivo(true);
         return toResponse(proveedorRepository.save(proveedor));
     }
@@ -65,18 +65,18 @@ public class ProveedorService {
     @Transactional
     public ProveedorResponse actualizar(Long id, ProveedorUpdateRequest request) {
         ProveedorEntity proveedor = findById(id);
-        String numeroDocumento = cleanRequired(request.numeroDocumento());
+        String numeroDocumento = normalizeCode(request.numeroDocumento());
         if (proveedorRepository.existsByNumeroDocumentoAndIdNot(numeroDocumento, id)) {
             throw new BusinessException("Ya existe un proveedor con el numero de documento indicado");
         }
 
         proveedor.setTipoDocumento(normalizeCode(request.tipoDocumento()));
         proveedor.setNumeroDocumento(numeroDocumento);
-        proveedor.setRazonSocial(cleanRequired(request.razonSocial()));
-        proveedor.setNombreComercial(clean(request.nombreComercial()));
-        proveedor.setDireccion(clean(request.direccion()));
+        proveedor.setRazonSocial(normalizeText(request.razonSocial()));
+        proveedor.setNombreComercial(normalizeText(request.nombreComercial()));
+        proveedor.setDireccion(normalizeText(request.direccion()));
         proveedor.setTelefono(clean(request.telefono()));
-        proveedor.setEmail(clean(request.email()));
+        proveedor.setEmail(normalizeEmail(request.email()));
         return toResponse(proveedor);
     }
 
@@ -117,6 +117,16 @@ public class ProveedorService {
 
     private String normalizeCode(String value) {
         return cleanRequired(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeEmail(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toLowerCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {

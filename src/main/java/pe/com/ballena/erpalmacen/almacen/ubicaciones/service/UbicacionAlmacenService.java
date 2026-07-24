@@ -79,8 +79,8 @@ public class UbicacionAlmacenService {
         UbicacionAlmacenEntity ubicacion = new UbicacionAlmacenEntity();
         ubicacion.setAlmacen(almacen);
         ubicacion.setCodigo(codigo);
-        ubicacion.setNombre(cleanRequired(request.nombre()));
-        ubicacion.setDescripcion(clean(request.descripcion()));
+        ubicacion.setNombre(normalizeText(request.nombre()));
+        ubicacion.setDescripcion(normalizeText(request.descripcion()));
         ubicacion.setActivo(true);
         return toResponse(ubicacionRepository.save(ubicacion));
     }
@@ -96,8 +96,8 @@ public class UbicacionAlmacenService {
 
         ubicacion.setAlmacen(almacen);
         ubicacion.setCodigo(codigo);
-        ubicacion.setNombre(cleanRequired(request.nombre()));
-        ubicacion.setDescripcion(clean(request.descripcion()));
+        ubicacion.setNombre(normalizeText(request.nombre()));
+        ubicacion.setDescripcion(normalizeText(request.descripcion()));
         return toResponse(ubicacion);
     }
 
@@ -147,6 +147,11 @@ public class UbicacionAlmacenService {
 
     private String normalizeCode(String value) {
         return cleanRequired(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {

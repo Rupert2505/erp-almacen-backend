@@ -47,6 +47,12 @@ public class ProductoController {
         ));
     }
 
+    @GetMapping("/siguiente-codigo")
+    @PreAuthorize("hasAuthority('PRODUCTO_VER') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<String>> obtenerSiguienteCodigo(@RequestParam Long familiaId) {
+        return ResponseEntity.ok(ApiResponse.ok(productoService.obtenerSiguienteCodigo(familiaId)));
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('PRODUCTO_VER') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<ProductoResponse>> obtener(@PathVariable Long id) {

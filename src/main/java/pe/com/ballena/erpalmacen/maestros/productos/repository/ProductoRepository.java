@@ -10,8 +10,6 @@ public interface ProductoRepository extends JpaRepository<ProductoEntity, Long>,
 
     boolean existsByCodigo(String codigo);
 
-    boolean existsByCodigoAndIdNot(String codigo, Long id);
-
     @Query("""
             select p
             from ProductoEntity p

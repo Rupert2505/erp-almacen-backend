@@ -52,9 +52,9 @@ public class AlmacenService {
 
         AlmacenEntity almacen = new AlmacenEntity();
         almacen.setCodigo(codigo);
-        almacen.setNombre(cleanRequired(request.nombre()));
-        almacen.setDireccion(clean(request.direccion()));
-        almacen.setResponsable(clean(request.responsable()));
+        almacen.setNombre(normalizeText(request.nombre()));
+        almacen.setDireccion(normalizeText(request.direccion()));
+        almacen.setResponsable(normalizeText(request.responsable()));
         almacen.setActivo(true);
         return toResponse(almacenRepository.save(almacen));
     }
@@ -68,9 +68,9 @@ public class AlmacenService {
         }
 
         almacen.setCodigo(codigo);
-        almacen.setNombre(cleanRequired(request.nombre()));
-        almacen.setDireccion(clean(request.direccion()));
-        almacen.setResponsable(clean(request.responsable()));
+        almacen.setNombre(normalizeText(request.nombre()));
+        almacen.setDireccion(normalizeText(request.direccion()));
+        almacen.setResponsable(normalizeText(request.responsable()));
         return toResponse(almacen);
     }
 
@@ -108,6 +108,11 @@ public class AlmacenService {
 
     private String normalizeCode(String value) {
         return cleanRequired(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {

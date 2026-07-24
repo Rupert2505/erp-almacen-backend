@@ -1,7 +1,9 @@
 package pe.com.ballena.erpalmacen.maestros.productos.service;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +37,7 @@ public class ProductoService {
     private final MarcaRepository marcaRepository;
     private final TipoArticuloRepository tipoArticuloRepository;
     private final UnidadMedidaRepository unidadMedidaRepository;
+    private final ProductoCodigoService productoCodigoService;
 
     public ProductoService(
             ProductoRepository productoRepository,
@@ -42,7 +45,8 @@ public class ProductoService {
             SubfamiliaRepository subfamiliaRepository,
             MarcaRepository marcaRepository,
             TipoArticuloRepository tipoArticuloRepository,
-            UnidadMedidaRepository unidadMedidaRepository
+            UnidadMedidaRepository unidadMedidaRepository,
+            ProductoCodigoService productoCodigoService
     ) {
         this.productoRepository = productoRepository;
         this.familiaRepository = familiaRepository;
@@ -50,6 +54,7 @@ public class ProductoService {
         this.marcaRepository = marcaRepository;
         this.tipoArticuloRepository = tipoArticuloRepository;
         this.unidadMedidaRepository = unidadMedidaRepository;
+        this.productoCodigoService = productoCodigoService;
     }
 
     @Transactional(readOnly = true)
@@ -63,7 +68,10 @@ public class ProductoService {
             Long unidadMedidaId,
             Pageable pageable
     ) {
-        return productoRepository.findAll(buildSpecification(texto, activo, tipoArticuloId, familiaId, subfamiliaId, marcaId, unidadMedidaId), pageable)
+        return productoRepository.findAll(
+                        buildSpecification(texto, activo, tipoArticuloId, familiaId, subfamiliaId, marcaId, unidadMedidaId),
+                        aplicarOrdenPorDefecto(pageable)
+                )
                 .map(this::toResponse);
     }
 
@@ -74,14 +82,9 @@ public class ProductoService {
 
     @Transactional
     public ProductoResponse crear(ProductoCreateRequest request) {
-        String codigo = normalizeCode(request.codigo());
-        if (productoRepository.existsByCodigo(codigo)) {
-            throw new BusinessException("Ya existe un producto con el codigo indicado");
-        }
-
         ProductoEntity producto = new ProductoEntity();
-        producto.setCodigo(codigo);
         applyValues(producto, request);
+        producto.setCodigo(productoCodigoService.generarCodigo(producto.getFamilia()));
         producto.setActivo(true);
         return toResponse(productoRepository.save(producto));
     }
@@ -89,14 +92,19 @@ public class ProductoService {
     @Transactional
     public ProductoResponse actualizar(Long id, ProductoUpdateRequest request) {
         ProductoEntity producto = findById(id);
-        String codigo = normalizeCode(request.codigo());
-        if (productoRepository.existsByCodigoAndIdNot(codigo, id)) {
-            throw new BusinessException("Ya existe un producto con el codigo indicado");
+        String codigo = normalizeOptionalCode(request.codigo());
+        if (codigo != null && !codigo.equals(producto.getCodigo())) {
+            throw new BusinessException("El codigo del producto no se puede modificar");
         }
 
-        producto.setCodigo(codigo);
         applyValues(producto, request);
         return toResponse(producto);
+    }
+
+    @Transactional(readOnly = true)
+    public String obtenerSiguienteCodigo(Long familiaId) {
+        FamiliaEntity familia = findFamiliaActiva(familiaId);
+        return productoCodigoService.obtenerSiguienteCodigo(familia);
     }
 
     @Transactional
@@ -120,8 +128,8 @@ public class ProductoService {
         FamiliaEntity familia = findFamiliaActiva(request.familiaId());
         SubfamiliaEntity subfamilia = findSubfamiliaActiva(request.subfamiliaId(), familia);
 
-        producto.setNombre(cleanRequired(request.nombre()));
-        producto.setDescripcion(clean(request.descripcion()));
+        producto.setNombre(normalizeText(request.nombre()));
+        producto.setDescripcion(normalizeText(request.descripcion()));
         producto.setTipoArticulo(tipoArticulo);
         producto.setFamilia(familia);
         producto.setSubfamilia(subfamilia);
@@ -141,8 +149,8 @@ public class ProductoService {
         FamiliaEntity familia = findFamiliaActiva(request.familiaId());
         SubfamiliaEntity subfamilia = findSubfamiliaActiva(request.subfamiliaId(), familia);
 
-        producto.setNombre(cleanRequired(request.nombre()));
-        producto.setDescripcion(clean(request.descripcion()));
+        producto.setNombre(normalizeText(request.nombre()));
+        producto.setDescripcion(normalizeText(request.descripcion()));
         producto.setTipoArticulo(tipoArticulo);
         producto.setFamilia(familia);
         producto.setSubfamilia(subfamilia);
@@ -306,6 +314,7 @@ public class ProductoService {
                 tipoArticulo.getCodigo(),
                 tipoArticulo.getNombre(),
                 familia.getId(),
+                familia.getPrefijo(),
                 familia.getNombre(),
                 subfamilia == null ? null : subfamilia.getId(),
                 subfamilia == null ? null : subfamilia.getNombre(),
@@ -324,13 +333,30 @@ public class ProductoService {
         );
     }
 
-    private String normalizeCode(String value) {
-        return cleanRequired(value).toUpperCase(Locale.ROOT);
+    private String normalizeOptionalCode(String value) {
+        String codigo = clean(value);
+        return codigo == null || codigo.isBlank() ? null : codigo.toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {
         String cleanValue = clean(value);
         return cleanValue == null || cleanValue.isBlank() ? null : cleanValue;
+    }
+
+    private Pageable aplicarOrdenPorDefecto(Pageable pageable) {
+        Sort ordenRecientesPrimero = Sort.by(Sort.Direction.DESC, "creadoEn", "id");
+        if (pageable == null) {
+            return PageRequest.of(0, 20, ordenRecientesPrimero);
+        }
+        if (pageable.getSort().isSorted()) {
+            return pageable;
+        }
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), ordenRecientesPrimero);
     }
 
     private String cleanRequired(String value) {

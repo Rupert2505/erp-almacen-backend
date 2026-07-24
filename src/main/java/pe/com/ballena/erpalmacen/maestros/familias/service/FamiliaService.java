@@ -7,18 +7,27 @@ import org.springframework.transaction.annotation.Transactional;
 import pe.com.ballena.erpalmacen.maestros.familias.dto.FamiliaCreateRequest;
 import pe.com.ballena.erpalmacen.maestros.familias.dto.FamiliaResponse;
 import pe.com.ballena.erpalmacen.maestros.familias.dto.FamiliaUpdateRequest;
+import pe.com.ballena.erpalmacen.maestros.familias.entity.FamiliaCorrelativoEntity;
 import pe.com.ballena.erpalmacen.maestros.familias.entity.FamiliaEntity;
+import pe.com.ballena.erpalmacen.maestros.familias.repository.FamiliaCorrelativoRepository;
 import pe.com.ballena.erpalmacen.maestros.familias.repository.FamiliaRepository;
 import pe.com.ballena.erpalmacen.shared.exception.BusinessException;
 import pe.com.ballena.erpalmacen.shared.exception.ResourceNotFoundException;
+
+import java.util.Locale;
 
 @Service
 public class FamiliaService {
 
     private final FamiliaRepository familiaRepository;
+    private final FamiliaCorrelativoRepository familiaCorrelativoRepository;
 
-    public FamiliaService(FamiliaRepository familiaRepository) {
+    public FamiliaService(
+            FamiliaRepository familiaRepository,
+            FamiliaCorrelativoRepository familiaCorrelativoRepository
+    ) {
         this.familiaRepository = familiaRepository;
+        this.familiaCorrelativoRepository = familiaCorrelativoRepository;
     }
 
     @Transactional(readOnly = true)
@@ -49,27 +58,44 @@ public class FamiliaService {
     @Transactional
     public FamiliaResponse crear(FamiliaCreateRequest request) {
         String nombre = cleanRequired(request.nombre());
+        String prefijo = normalizePrefix(request.prefijo());
         if (familiaRepository.existsByNombreIgnoreCase(nombre)) {
             throw new BusinessException("Ya existe una familia con el nombre indicado");
         }
+        if (familiaRepository.existsByPrefijo(prefijo)) {
+            throw new BusinessException("Ya existe una familia con el prefijo indicado");
+        }
 
         FamiliaEntity familia = new FamiliaEntity();
-        familia.setNombre(nombre);
-        familia.setDescripcion(clean(request.descripcion()));
+        familia.setNombre(normalizeText(nombre));
+        familia.setPrefijo(prefijo);
+        familia.setDescripcion(normalizeText(request.descripcion()));
         familia.setActivo(true);
-        return toResponse(familiaRepository.save(familia));
+        FamiliaEntity familiaGuardada = familiaRepository.save(familia);
+
+        FamiliaCorrelativoEntity correlativo = new FamiliaCorrelativoEntity();
+        correlativo.setFamilia(familiaGuardada);
+        correlativo.setUltimoCorrelativo(0L);
+        familiaCorrelativoRepository.save(correlativo);
+
+        return toResponse(familiaGuardada);
     }
 
     @Transactional
     public FamiliaResponse actualizar(Long id, FamiliaUpdateRequest request) {
         FamiliaEntity familia = findById(id);
         String nombre = cleanRequired(request.nombre());
+        String prefijo = normalizePrefix(request.prefijo());
         if (familiaRepository.existsByNombreIgnoreCaseAndIdNot(nombre, id)) {
             throw new BusinessException("Ya existe una familia con el nombre indicado");
         }
+        if (familiaRepository.existsByPrefijoAndIdNot(prefijo, id)) {
+            throw new BusinessException("Ya existe una familia con el prefijo indicado");
+        }
 
-        familia.setNombre(nombre);
-        familia.setDescripcion(clean(request.descripcion()));
+        familia.setNombre(normalizeText(nombre));
+        familia.setPrefijo(prefijo);
+        familia.setDescripcion(normalizeText(request.descripcion()));
         if (request.activo() != null) {
             familia.setActivo(request.activo());
         }
@@ -99,6 +125,7 @@ public class FamiliaService {
         return new FamiliaResponse(
                 familia.getId(),
                 familia.getNombre(),
+                familia.getPrefijo(),
                 familia.getDescripcion(),
                 familia.isActivo(),
                 familia.getCreadoEn(),
@@ -113,6 +140,23 @@ public class FamiliaService {
 
     private String cleanRequired(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private String normalizePrefix(String value) {
+        String prefijo = cleanRequired(value);
+        if (prefijo == null || prefijo.isBlank()) {
+            throw new BusinessException("El prefijo de la familia es obligatorio");
+        }
+        prefijo = prefijo.toUpperCase(Locale.ROOT);
+        if (!prefijo.matches("^[A-Z0-9]+$")) {
+            throw new BusinessException("El prefijo solo puede contener letras y numeros");
+        }
+        return prefijo;
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String clean(String value) {

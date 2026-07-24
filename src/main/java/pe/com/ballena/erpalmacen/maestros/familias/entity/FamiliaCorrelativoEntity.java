@@ -2,9 +2,12 @@ package pe.com.ballena.erpalmacen.maestros.familias.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -12,24 +15,19 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "familias")
-public class FamiliaEntity {
+@Table(name = "familia_correlativos")
+public class FamiliaCorrelativoEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 150)
-    private String nombre;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "familia_id", nullable = false)
+    private FamiliaEntity familia;
 
-    @Column(nullable = false, unique = true, length = 20)
-    private String prefijo;
-
-    @Column(length = 255)
-    private String descripcion;
-
-    @Column(nullable = false)
-    private boolean activo = true;
+    @Column(name = "ultimo_correlativo", nullable = false)
+    private Long ultimoCorrelativo = 0L;
 
     @Column(name = "creado_en", nullable = false)
     private LocalDateTime creadoEn;
@@ -51,36 +49,20 @@ public class FamiliaEntity {
         return id;
     }
 
-    public String getNombre() {
-        return nombre;
+    public FamiliaEntity getFamilia() {
+        return familia;
     }
 
-    public void setNombre(String nombre) {
-        this.nombre = nombre;
+    public void setFamilia(FamiliaEntity familia) {
+        this.familia = familia;
     }
 
-    public String getPrefijo() {
-        return prefijo;
+    public Long getUltimoCorrelativo() {
+        return ultimoCorrelativo;
     }
 
-    public void setPrefijo(String prefijo) {
-        this.prefijo = prefijo;
-    }
-
-    public String getDescripcion() {
-        return descripcion;
-    }
-
-    public void setDescripcion(String descripcion) {
-        this.descripcion = descripcion;
-    }
-
-    public boolean isActivo() {
-        return activo;
-    }
-
-    public void setActivo(boolean activo) {
-        this.activo = activo;
+    public void setUltimoCorrelativo(Long ultimoCorrelativo) {
+        this.ultimoCorrelativo = ultimoCorrelativo;
     }
 
     public LocalDateTime getCreadoEn() {

@@ -52,8 +52,8 @@ public class MarcaService {
 
         MarcaEntity marca = new MarcaEntity();
         marca.setCodigo(codigo);
-        marca.setNombre(clean(request.nombre()));
-        marca.setDescripcion(clean(request.descripcion()));
+        marca.setNombre(normalizeText(request.nombre()));
+        marca.setDescripcion(normalizeText(request.descripcion()));
         marca.setActivo(true);
         return toResponse(marcaRepository.save(marca));
     }
@@ -67,8 +67,8 @@ public class MarcaService {
         }
 
         marca.setCodigo(codigo);
-        marca.setNombre(clean(request.nombre()));
-        marca.setDescripcion(clean(request.descripcion()));
+        marca.setNombre(normalizeText(request.nombre()));
+        marca.setDescripcion(normalizeText(request.descripcion()));
         return toResponse(marca);
     }
 
@@ -105,6 +105,11 @@ public class MarcaService {
 
     private String normalizeCode(String value) {
         return clean(value).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        String cleanValue = clean(value);
+        return cleanValue == null || cleanValue.isBlank() ? null : cleanValue.toUpperCase(Locale.ROOT);
     }
 
     private String normalizeSearch(String value) {
