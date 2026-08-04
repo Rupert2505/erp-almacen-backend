@@ -1100,9 +1100,56 @@ class MovimientoInventarioServiceTest {
                 data.almacenOrigen().getId()
         ).orElseThrow();
         assertThat(stock.getCantidadActual()).isEqualByComparingTo("0.0000");
+        assertThat(stock.getCostoPromedio()).isNull();
         assertThat(kardexRepository.findByMovimientoId(entrada.getId())).hasSize(2);
         assertThat(entrada.getEstado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
         assertThat(entrada.getAnuladoEn()).isNotNull();
+    }
+
+    @Test
+    void anularEntradaSinMovimientosPosterioresRestauraCostoPromedioAnterior() {
+        TestData data = crearDatosBase();
+        confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("3.000000"));
+        MovimientoInventarioEntity entradaPosteriorSinUso = confirmarEntrada(
+                data,
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        );
+
+        var stockAntes = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stockAntes.getCantidadActual()).isEqualByComparingTo("20.0000");
+        assertThat(stockAntes.getCostoPromedio()).isEqualByComparingTo("4.000000");
+
+        movimientoInventarioService.anularMovimiento(entradaPosteriorSinUso.getId(), "Error en costo de entrada");
+
+        var stockDespues = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stockDespues.getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(stockDespues.getCostoPromedio()).isEqualByComparingTo("3.000000");
+        assertThat(kardexRepository.findByMovimientoId(entradaPosteriorSinUso.getId())).hasSize(2);
+    }
+
+    @Test
+    void anularPrimeraEntradaDeProductoDejaStockEnCeroSinCostoResidual() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("8.0000"), new BigDecimal("9.876543"));
+
+        movimientoInventarioService.anularMovimiento(entrada.getId(), "Primera entrada incorrecta");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("0.0000");
+        assertThat(stock.getCostoPromedio()).isNull();
+        assertThat(kardexRepository.findByMovimientoId(entrada.getId()))
+                .extracting(kardex -> kardex.getObservacion())
+                .anyMatch(observacion -> observacion != null && observacion.contains("ANULACION MOVIMIENTO"));
     }
 
     @Test
@@ -1187,7 +1234,7 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
-    void anularEntradaSinStockSuficienteParaRevertirLanzaBusinessException() {
+    void anularEntradaConSalidaPosteriorLanzaBusinessException() {
         TestData data = crearDatosBase();
         MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("10.0000"));
         MovimientoInventarioEntity salida = crearMovimiento(
@@ -1201,7 +1248,85 @@ class MovimientoInventarioServiceTest {
 
         assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(entrada.getId(), "Sin stock para reversa"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("Stock insuficiente");
+                .hasMessageContaining("movimientos posteriores");
+    }
+
+    @Test
+    void anularEntradaConOtraEntradaPosteriorLanzaBusinessException() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity primeraEntrada = confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("3.000000"));
+        confirmarEntrada(data, new BigDecimal("5.0000"), new BigDecimal("4.000000"));
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(primeraEntrada.getId(), "Entrada historica"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("movimientos posteriores");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("15.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("3.333333");
+    }
+
+    @Test
+    void anularEntradaConTransferenciaPosteriorLanzaBusinessException() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("3.000000"));
+        MovimientoInventarioEntity transferencia = crearMovimiento(
+                TipoMovimientoInventario.TRANSFERENCIA,
+                data.almacenOrigen(),
+                data.almacenDestino(),
+                data.usuario()
+        );
+        crearDetalle(transferencia, data.producto(), new BigDecimal("2.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(transferencia.getId());
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(entrada.getId(), "Entrada historica"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("movimientos posteriores");
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void anularEntradaMultilineaConPosteriorEnUnaLineaRechazaTodoDocumento() {
+        TestData data = crearDatosBase();
+        ProductoEntity segundoProducto = crearProducto(
+                data.producto().getUnidadMedida(),
+                data.producto().getFamilia(),
+                data.producto().getTipoArticulo()
+        );
+        MovimientoInventarioEntity entrada = crearMovimiento(
+                TipoMovimientoInventario.ENTRADA_AJUSTE,
+                null,
+                data.almacenOrigen(),
+                data.usuario()
+        );
+        crearDetalle(entrada, data.producto(), new BigDecimal("10.0000"), null, null, new BigDecimal("3.000000"));
+        crearDetalle(entrada, segundoProducto, new BigDecimal("7.0000"), null, null, new BigDecimal("2.000000"));
+        movimientoInventarioService.confirmarMovimiento(entrada.getId());
+
+        MovimientoInventarioEntity salidaPosterior = crearMovimiento(
+                TipoMovimientoInventario.SALIDA_CONSUMO,
+                data.almacenOrigen(),
+                null,
+                data.usuario()
+        );
+        crearDetalle(salidaPosterior, segundoProducto, new BigDecimal("1.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(salidaPosterior.getId());
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(entrada.getId(), "Una linea ya fue usada"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("movimientos posteriores");
+
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                segundoProducto.getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("6.0000");
     }
 
     private MovimientoInventarioCreateRequest crearEntradaCompraRequest(
@@ -1551,13 +1676,21 @@ class MovimientoInventarioServiceTest {
     }
 
     private MovimientoInventarioEntity confirmarEntrada(TestData data, BigDecimal cantidad) {
+        return confirmarEntrada(data, cantidad, new BigDecimal("5.0000"));
+    }
+
+    private MovimientoInventarioEntity confirmarEntrada(
+            TestData data,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario
+    ) {
         MovimientoInventarioEntity entrada = crearMovimiento(
                 TipoMovimientoInventario.ENTRADA_AJUSTE,
                 null,
                 data.almacenOrigen(),
                 data.usuario()
         );
-        crearDetalle(entrada, data.producto(), cantidad, null, null, new BigDecimal("5.0000"));
+        crearDetalle(entrada, data.producto(), cantidad, null, null, costoUnitario);
         movimientoInventarioService.confirmarMovimiento(entrada.getId());
         return entrada;
     }

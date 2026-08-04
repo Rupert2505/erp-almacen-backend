@@ -1,5 +1,7 @@
 package pe.com.ballena.erpalmacen.inventario.service;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEntity;
@@ -18,9 +20,17 @@ public class StockService {
     private static final int COST_SCALE = 6;
 
     private final StockActualRepository stockActualRepository;
+    private final JdbcTemplate jdbcTemplate;
+    private final String stockActualTable;
 
-    public StockService(StockActualRepository stockActualRepository) {
+    public StockService(
+            StockActualRepository stockActualRepository,
+            JdbcTemplate jdbcTemplate,
+            @Value("${spring.jpa.properties.hibernate.default_schema:}") String defaultSchema
+    ) {
         this.stockActualRepository = stockActualRepository;
+        this.jdbcTemplate = jdbcTemplate;
+        this.stockActualTable = resolverTabla(defaultSchema, "stock_actual");
     }
 
     public StockResultado registrarEntrada(
@@ -31,8 +41,8 @@ public class StockService {
             BigDecimal costoUnitario,
             LocalDateTime fechaMovimiento
     ) {
-        StockActualEntity stock = buscarConBloqueo(producto.getId(), almacen.getId(), ubicacion)
-                .orElseGet(() -> crearStock(producto, almacen, ubicacion));
+        asegurarFilaStock(producto, almacen, ubicacion);
+        StockActualEntity stock = bloquearStock(producto, almacen, ubicacion);
 
         BigDecimal saldoAnterior = stock.getCantidadActual();
         BigDecimal costoPromedioAnterior = stock.getCostoPromedio();
@@ -91,6 +101,48 @@ public class StockService {
         );
     }
 
+    public StockActualEntity bloquearStock(
+            ProductoEntity producto,
+            AlmacenEntity almacen,
+            UbicacionAlmacenEntity ubicacion
+    ) {
+        return buscarConBloqueo(producto.getId(), almacen.getId(), ubicacion)
+                .orElseThrow(() -> new BusinessException("No existe stock para el producto en el almacen indicado"));
+    }
+
+    public StockResultado revertirEntrada(
+            StockActualEntity stock,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario,
+            LocalDateTime fechaMovimiento
+    ) {
+        BigDecimal saldoAnterior = stock.getCantidadActual();
+        if (saldoAnterior.compareTo(cantidad) < 0) {
+            throw new BusinessException("Stock insuficiente para confirmar el movimiento");
+        }
+
+        BigDecimal saldoFinal = saldoAnterior.subtract(cantidad);
+        stock.setCantidadActual(saldoFinal);
+        stock.setCostoPromedio(calcularCostoPromedioRevertido(
+                saldoAnterior,
+                stock.getCostoPromedio(),
+                cantidad,
+                costoUnitario,
+                saldoFinal
+        ));
+        stock.setFechaUltimoMovimiento(fechaMovimiento);
+
+        StockActualEntity guardado = stockActualRepository.save(stock);
+        BigDecimal costoReferencia = costoUnitario != null ? costoUnitario : guardado.getCostoPromedio();
+        return new StockResultado(
+                guardado,
+                saldoAnterior,
+                saldoFinal,
+                costoReferencia,
+                guardado.getCostoPromedio()
+        );
+    }
+
     private java.util.Optional<StockActualEntity> buscarConBloqueo(
             Long productoId,
             Long almacenId,
@@ -102,17 +154,25 @@ public class StockService {
         return stockActualRepository.findByProductoAlmacenUbicacionForUpdate(productoId, almacenId, ubicacion.getId());
     }
 
-    private StockActualEntity crearStock(
+    private void asegurarFilaStock(
             ProductoEntity producto,
             AlmacenEntity almacen,
             UbicacionAlmacenEntity ubicacion
     ) {
-        StockActualEntity stock = new StockActualEntity();
-        stock.setProducto(producto);
-        stock.setAlmacen(almacen);
-        stock.setUbicacion(ubicacion);
-        stock.setCantidadActual(BigDecimal.ZERO);
-        return stock;
+        if (ubicacion == null) {
+            jdbcTemplate.update("""
+                    insert into %s (producto_id, almacen_id, ubicacion_id, cantidad_actual, creado_en)
+                    values (?, ?, null, 0, current_timestamp)
+                    on conflict (producto_id, almacen_id) where ubicacion_id is null do nothing
+                    """.formatted(stockActualTable), producto.getId(), almacen.getId());
+            return;
+        }
+
+        jdbcTemplate.update("""
+                insert into %s (producto_id, almacen_id, ubicacion_id, cantidad_actual, creado_en)
+                values (?, ?, ?, 0, current_timestamp)
+                on conflict (producto_id, almacen_id, ubicacion_id) where ubicacion_id is not null do nothing
+                """.formatted(stockActualTable), producto.getId(), almacen.getId(), ubicacion.getId());
     }
 
     private BigDecimal calcularCostoPromedioPonderado(
@@ -130,6 +190,41 @@ public class StockService {
         BigDecimal valorAnterior = cantidadAnterior.multiply(costoAnterior);
         BigDecimal valorEntrada = cantidadEntrada.multiply(costoUnitario);
         return valorAnterior.add(valorEntrada).divide(cantidadFinal, COST_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calcularCostoPromedioRevertido(
+            BigDecimal cantidadAnterior,
+            BigDecimal costoPromedioAnterior,
+            BigDecimal cantidadEntrada,
+            BigDecimal costoUnitario,
+            BigDecimal cantidadFinal
+    ) {
+        if (cantidadFinal.compareTo(BigDecimal.ZERO) == 0) {
+            return null;
+        }
+        if (costoUnitario == null) {
+            return costoPromedioAnterior;
+        }
+
+        BigDecimal costoAnterior = costoPromedioAnterior == null ? BigDecimal.ZERO : costoPromedioAnterior;
+        BigDecimal valorAnterior = cantidadAnterior.multiply(costoAnterior);
+        BigDecimal valorEntrada = cantidadEntrada.multiply(costoUnitario);
+        BigDecimal valorFinal = valorAnterior.subtract(valorEntrada);
+        if (valorFinal.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("El valor de stock no puede quedar negativo al anular la entrada");
+        }
+        return valorFinal.divide(cantidadFinal, COST_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private String resolverTabla(String schema, String table) {
+        String cleanSchema = schema == null ? "" : schema.trim();
+        if (cleanSchema.isBlank()) {
+            return table;
+        }
+        if (!cleanSchema.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new IllegalArgumentException("Nombre de esquema invalido para consultas de stock");
+        }
+        return cleanSchema + "." + table;
     }
 
     public record StockResultado(

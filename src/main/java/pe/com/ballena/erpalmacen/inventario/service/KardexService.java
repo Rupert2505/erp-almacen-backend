@@ -9,6 +9,7 @@ import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalle
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoInventarioEntity;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Service
 public class KardexService {
@@ -47,5 +48,30 @@ public class KardexService {
         kardex.setUsuario(movimiento.getUsuario());
         kardex.setObservacion(observacion);
         return kardexRepository.save(kardex);
+    }
+
+    public List<KardexEntity> findByMovimientoDetalle(Long movimientoId, Long detalleId) {
+        return kardexRepository.findByMovimientoDetalle(movimientoId, detalleId);
+    }
+
+    public boolean existsPosteriorSinUbicacion(KardexEntity kardexOriginal, Long movimientoId) {
+        return kardexRepository.existsPosteriorSinUbicacion(
+                kardexOriginal.getProducto().getId(),
+                kardexOriginal.getAlmacen().getId(),
+                movimientoId,
+                kardexOriginal.getFechaMovimiento(),
+                kardexOriginal.getId()
+        );
+    }
+
+    public boolean existsPosteriorConUbicacion(KardexEntity kardexOriginal, Long movimientoId) {
+        return kardexRepository.existsPosteriorConUbicacion(
+                kardexOriginal.getProducto().getId(),
+                kardexOriginal.getAlmacen().getId(),
+                kardexOriginal.getUbicacion().getId(),
+                movimientoId,
+                kardexOriginal.getFechaMovimiento(),
+                kardexOriginal.getId()
+        );
     }
 }

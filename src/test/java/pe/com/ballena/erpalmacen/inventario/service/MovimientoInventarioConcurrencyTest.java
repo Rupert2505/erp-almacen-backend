@@ -196,6 +196,89 @@ class MovimientoInventarioConcurrencyTest {
                 + kardexRepository.findByMovimientoId(salida2.getId()).size()).isEqualTo(1);
     }
 
+    @Test
+    void entradasConcurrentesCreandoPrimerStockAcumulanCantidadYCostoPromedio() throws Exception {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada1 = crearMovimientoEntrada(
+                data,
+                new BigDecimal("5.0000"),
+                new BigDecimal("2.000000")
+        );
+        MovimientoInventarioEntity entrada2 = crearMovimientoEntrada(
+                data,
+                new BigDecimal("15.0000"),
+                new BigDecimal("4.000000")
+        );
+
+        List<ResultadoConcurrente> resultados = ejecutarConcurrentemente(
+                () -> {
+                    movimientoInventarioService.confirmarMovimiento(entrada1.getId());
+                    return ResultadoConcurrente.exito();
+                },
+                () -> {
+                    movimientoInventarioService.confirmarMovimiento(entrada2.getId());
+                    return ResultadoConcurrente.exito();
+                }
+        );
+
+        assertThat(resultados).filteredOn(ResultadoConcurrente::exitoso).hasSize(2);
+        assertThat(resultados).filteredOn(resultado -> !resultado.exitoso()).isEmpty();
+
+        var stocks = stockActualRepository.findAll().stream()
+                .filter(stock -> stock.getProducto().getId().equals(data.producto().getId()))
+                .filter(stock -> stock.getAlmacen().getId().equals(data.almacenOrigen().getId()))
+                .filter(stock -> stock.getUbicacion() == null)
+                .toList();
+        assertThat(stocks).hasSize(1);
+        assertThat(stocks.get(0).getCantidadActual()).isEqualByComparingTo("20.0000");
+        assertThat(stocks.get(0).getCostoPromedio()).isEqualByComparingTo("3.500000");
+        assertThat(kardexRepository.findByMovimientoId(entrada1.getId())).hasSize(1);
+        assertThat(kardexRepository.findByMovimientoId(entrada2.getId())).hasSize(1);
+    }
+
+    @Test
+    void entradasConcurrentesConStockExistenteAcumulanCantidadYCostoPromedio() throws Exception {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entradaInicial = crearMovimientoEntrada(
+                data,
+                new BigDecimal("10.0000"),
+                new BigDecimal("1.000000")
+        );
+        movimientoInventarioService.confirmarMovimiento(entradaInicial.getId());
+
+        MovimientoInventarioEntity entrada1 = crearMovimientoEntrada(
+                data,
+                new BigDecimal("10.0000"),
+                new BigDecimal("2.000000")
+        );
+        MovimientoInventarioEntity entrada2 = crearMovimientoEntrada(
+                data,
+                new BigDecimal("10.0000"),
+                new BigDecimal("4.000000")
+        );
+
+        List<ResultadoConcurrente> resultados = ejecutarConcurrentemente(
+                () -> {
+                    movimientoInventarioService.confirmarMovimiento(entrada1.getId());
+                    return ResultadoConcurrente.exito();
+                },
+                () -> {
+                    movimientoInventarioService.confirmarMovimiento(entrada2.getId());
+                    return ResultadoConcurrente.exito();
+                }
+        );
+
+        assertThat(resultados).filteredOn(ResultadoConcurrente::exitoso).hasSize(2);
+        assertThat(resultados).filteredOn(resultado -> !resultado.exitoso()).isEmpty();
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("30.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("2.333333");
+    }
+
     @SafeVarargs
     private List<ResultadoConcurrente> ejecutarConcurrentemente(Callable<ResultadoConcurrente>... tareas)
             throws Exception {
@@ -226,13 +309,21 @@ class MovimientoInventarioConcurrencyTest {
     }
 
     private MovimientoInventarioEntity crearMovimientoEntrada(TestData data, BigDecimal cantidad) {
+        return crearMovimientoEntrada(data, cantidad, new BigDecimal("7.500000"));
+    }
+
+    private MovimientoInventarioEntity crearMovimientoEntrada(
+            TestData data,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario
+    ) {
         MovimientoInventarioEntity movimiento = crearMovimiento(
                 TipoMovimientoInventario.ENTRADA_AJUSTE,
                 null,
                 data.almacenOrigen(),
                 data.usuario()
         );
-        crearDetalle(movimiento, data.producto(), cantidad, new BigDecimal("7.500000"));
+        crearDetalle(movimiento, data.producto(), cantidad, costoUnitario);
         return movimiento;
     }
 

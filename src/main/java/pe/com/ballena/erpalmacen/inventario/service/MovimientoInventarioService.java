@@ -13,6 +13,7 @@ import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.repository.UbicacionAlmacenRepository;
+import pe.com.ballena.erpalmacen.inventario.kardex.entity.KardexEntity;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
@@ -25,6 +26,7 @@ import pe.com.ballena.erpalmacen.inventario.movimientos.repository.MovimientoDet
 import pe.com.ballena.erpalmacen.inventario.movimientos.repository.MovimientoInventarioRepository;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
+import pe.com.ballena.erpalmacen.inventario.stock.entity.StockActualEntity;
 import pe.com.ballena.erpalmacen.maestros.productos.entity.ProductoEntity;
 import pe.com.ballena.erpalmacen.maestros.productos.repository.ProductoRepository;
 import pe.com.ballena.erpalmacen.maestros.proveedores.entity.ProveedorEntity;
@@ -49,6 +51,7 @@ public class MovimientoInventarioService {
     private static final String INVENTARIO_SALIDA = "INVENTARIO_SALIDA";
     private static final String INVENTARIO_TRANSFERENCIA = "INVENTARIO_TRANSFERENCIA";
     private static final String INVENTARIO_AJUSTE = "INVENTARIO_AJUSTE";
+    private static final String MENSAJE_ANULACION_ENTRADA_CON_POSTERIORES = "No se puede anular la entrada porque existen movimientos posteriores que utilizaron el stock o el costo promedio generado. Registre una devolucion al proveedor o un ajuste de inventario.";
     private static final Set<String> COMPROBANTE_TIPOS_PERMITIDOS = Set.of("FACTURA", "BOLETA", "OTRO");
 
     private final MovimientoInventarioRepository movimientoInventarioRepository;
@@ -661,10 +664,16 @@ public class MovimientoInventarioService {
         validarAlmacenActivo(almacenDestino, "almacen destino");
         validarUbicacionActivaYCoherente(ubicacionDestino, almacenDestino, "ubicacion destino");
 
-        StockService.StockResultado stockResultado = stockService.registrarSalida(
+        StockActualEntity stockBloqueado = stockService.bloquearStock(
                 detalle.getProducto(),
                 almacenDestino,
-                ubicacionDestino,
+                ubicacionDestino
+        );
+        KardexEntity kardexOriginal = obtenerKardexOriginalEntrada(movimiento, detalle, almacenDestino, ubicacionDestino);
+        validarSinMovimientosPosteriores(kardexOriginal, movimiento);
+
+        StockService.StockResultado stockResultado = stockService.revertirEntrada(
+                stockBloqueado,
                 detalle.getCantidad(),
                 detalle.getCostoUnitario(),
                 fechaAnulacion
@@ -1192,6 +1201,40 @@ public class MovimientoInventarioService {
     private String observacionAnulacion(MovimientoInventarioEntity movimiento, String motivo) {
         String observacion = "ANULACION MOVIMIENTO " + movimiento.getNumero() + ": " + motivo;
         return observacion.length() <= 500 ? observacion : observacion.substring(0, 500);
+    }
+
+    private KardexEntity obtenerKardexOriginalEntrada(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            AlmacenEntity almacen,
+            UbicacionAlmacenEntity ubicacion
+    ) {
+        return kardexService.findByMovimientoDetalle(movimiento.getId(), detalle.getId()).stream()
+                .filter(kardex -> kardex.getProducto().getId().equals(detalle.getProducto().getId()))
+                .filter(kardex -> kardex.getAlmacen().getId().equals(almacen.getId()))
+                .filter(kardex -> mismaUbicacion(kardex.getUbicacion(), ubicacion))
+                .filter(kardex -> kardex.getEntrada().compareTo(BigDecimal.ZERO) > 0)
+                .findFirst()
+                .orElseThrow(() -> new BusinessException("No se encontro kardex original para anular la entrada"));
+    }
+
+    private void validarSinMovimientosPosteriores(
+            KardexEntity kardexOriginal,
+            MovimientoInventarioEntity movimiento
+    ) {
+        boolean existePosterior = kardexOriginal.getUbicacion() == null
+                ? kardexService.existsPosteriorSinUbicacion(kardexOriginal, movimiento.getId())
+                : kardexService.existsPosteriorConUbicacion(kardexOriginal, movimiento.getId());
+        if (existePosterior) {
+            throw new BusinessException(MENSAJE_ANULACION_ENTRADA_CON_POSTERIORES);
+        }
+    }
+
+    private boolean mismaUbicacion(UbicacionAlmacenEntity actual, UbicacionAlmacenEntity esperada) {
+        if (actual == null || esperada == null) {
+            return actual == null && esperada == null;
+        }
+        return actual.getId().equals(esperada.getId());
     }
 
     private String normalizeSearch(String value) {
