@@ -5,6 +5,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.persistence.criteria.JoinType;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEntity;
 import pe.com.ballena.erpalmacen.inventario.kardex.dto.KardexResponse;
@@ -86,14 +87,17 @@ public class KardexConsultaService {
         String textoNormalizado = normalizeSearch(texto);
         return (root, query, criteriaBuilder) -> {
             java.util.ArrayList<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
+            var productoJoin = root.join("producto");
+            var almacenJoin = root.join("almacen");
+            var ubicacionJoin = root.join("ubicacion", JoinType.LEFT);
             if (productoId != null) {
-                predicates.add(criteriaBuilder.equal(root.get("producto").get("id"), productoId));
+                predicates.add(criteriaBuilder.equal(productoJoin.get("id"), productoId));
             }
             if (almacenId != null) {
-                predicates.add(criteriaBuilder.equal(root.get("almacen").get("id"), almacenId));
+                predicates.add(criteriaBuilder.equal(almacenJoin.get("id"), almacenId));
             }
             if (ubicacionId != null) {
-                predicates.add(criteriaBuilder.equal(root.get("ubicacion").get("id"), ubicacionId));
+                predicates.add(criteriaBuilder.equal(ubicacionJoin.get("id"), ubicacionId));
             }
             if (tipoMovimiento != null) {
                 predicates.add(criteriaBuilder.equal(root.get("tipoMovimiento"), tipoMovimiento));
@@ -109,12 +113,12 @@ public class KardexConsultaService {
                 predicates.add(criteriaBuilder.or(
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("numeroMovimiento")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("observacion")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("producto").get("codigo")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("producto").get("nombre")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("almacen").get("codigo")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("almacen").get("nombre")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("ubicacion").get("codigo")), pattern),
-                        criteriaBuilder.like(criteriaBuilder.lower(root.get("ubicacion").get("nombre")), pattern)
+                        criteriaBuilder.like(criteriaBuilder.lower(productoJoin.get("codigo")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(productoJoin.get("nombre")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(almacenJoin.get("codigo")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(almacenJoin.get("nombre")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(ubicacionJoin.get("codigo")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(ubicacionJoin.get("nombre")), pattern)
                 ));
             }
             return criteriaBuilder.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));

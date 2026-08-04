@@ -2,6 +2,8 @@
 
 Guia minima para ejecutar el backend del ERP Almacen en perfil `prod` y ajustar el soporte multiusuario.
 
+El resumen tecnico del desarrollo backend esta en `docs/desarrollo-backend.md`.
+
 ## Perfil Productivo
 
 El backend debe ejecutarse con:
