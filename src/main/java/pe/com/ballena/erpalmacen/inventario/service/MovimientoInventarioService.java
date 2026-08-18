@@ -14,8 +14,11 @@ import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.ubicaciones.repository.UbicacionAlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.kardex.entity.KardexEntity;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorCreateRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleDevolucionPendienteResponse;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleResponse;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
@@ -37,8 +40,12 @@ import pe.com.ballena.erpalmacen.usuarios.entity.UsuarioEntity;
 import pe.com.ballena.erpalmacen.usuarios.repository.UsuarioRepository;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -51,13 +58,20 @@ public class MovimientoInventarioService {
     private static final String INVENTARIO_SALIDA = "INVENTARIO_SALIDA";
     private static final String INVENTARIO_TRANSFERENCIA = "INVENTARIO_TRANSFERENCIA";
     private static final String INVENTARIO_AJUSTE = "INVENTARIO_AJUSTE";
+    private static final String INVENTARIO_DEVOLUCION_VER = "INVENTARIO_DEVOLUCION_VER";
+    private static final String INVENTARIO_DEVOLUCION_CREAR = "INVENTARIO_DEVOLUCION_CREAR";
+    private static final String INVENTARIO_DEVOLUCION_CONFIRMAR = "INVENTARIO_DEVOLUCION_CONFIRMAR";
+    private static final String INVENTARIO_DEVOLUCION_ANULAR = "INVENTARIO_DEVOLUCION_ANULAR";
+    private static final int COST_SCALE = 6;
     private static final String MENSAJE_ANULACION_ENTRADA_CON_POSTERIORES = "No se puede anular la entrada porque existen movimientos posteriores que utilizaron el stock o el costo promedio generado. Registre una devolucion al proveedor o un ajuste de inventario.";
+    private static final String MENSAJE_ANULACION_DEVOLUCION_CON_POSTERIORES = "No se puede anular la devolucion porque existen movimientos posteriores que utilizaron el stock o el costo promedio generado.";
     private static final Set<String> COMPROBANTE_TIPOS_PERMITIDOS = Set.of("FACTURA", "BOLETA", "OTRO");
 
     private final MovimientoInventarioRepository movimientoInventarioRepository;
     private final MovimientoDetalleRepository movimientoDetalleRepository;
     private final StockService stockService;
     private final KardexService kardexService;
+    private final CostoInventariableService costoInventariableService;
     private final NumeroMovimientoService numeroMovimientoService;
     private final UsuarioRepository usuarioRepository;
     private final ProveedorRepository proveedorRepository;
@@ -70,6 +84,7 @@ public class MovimientoInventarioService {
             MovimientoDetalleRepository movimientoDetalleRepository,
             StockService stockService,
             KardexService kardexService,
+            CostoInventariableService costoInventariableService,
             NumeroMovimientoService numeroMovimientoService,
             UsuarioRepository usuarioRepository,
             ProveedorRepository proveedorRepository,
@@ -81,6 +96,7 @@ public class MovimientoInventarioService {
         this.movimientoDetalleRepository = movimientoDetalleRepository;
         this.stockService = stockService;
         this.kardexService = kardexService;
+        this.costoInventariableService = costoInventariableService;
         this.numeroMovimientoService = numeroMovimientoService;
         this.usuarioRepository = usuarioRepository;
         this.proveedorRepository = proveedorRepository;
@@ -159,11 +175,85 @@ public class MovimientoInventarioService {
         return toResponse(guardado);
     }
 
+    @Transactional
+    public MovimientoInventarioResponse crearDevolucionProveedor(
+            DevolucionProveedorCreateRequest request,
+            Authentication authentication
+    ) {
+        validarPermisoDevolucionCrear(authentication);
+        validarRequestDevolucionProveedor(request);
+
+        UsuarioEntity usuario = obtenerUsuarioAutenticado(authentication);
+        MovimientoInventarioEntity entradaOrigen = obtenerEntradaProveedorOrigen(request.movimientoOrigenId(), false);
+        ProveedorEntity proveedor = resolverProveedorDevolucion(request.proveedorId(), entradaOrigen);
+
+        MovimientoInventarioEntity devolucion = new MovimientoInventarioEntity();
+        devolucion.setNumero(numeroMovimientoService.generar(TipoMovimientoInventario.DEVOLUCION_PROVEEDOR));
+        devolucion.setTipoMovimiento(TipoMovimientoInventario.DEVOLUCION_PROVEEDOR);
+        devolucion.setEstado(EstadoMovimientoInventario.BORRADOR);
+        devolucion.setMovimientoOrigen(entradaOrigen);
+        devolucion.setFechaMovimiento(request.fechaMovimiento());
+        devolucion.setProveedor(proveedor);
+        devolucion.setAlmacenOrigen(entradaOrigen.getAlmacenDestino());
+        devolucion.setDocumentoReferencia(entradaOrigen.getNumero());
+        devolucion.setMotivoMovimiento(clean(request.motivo()));
+        devolucion.setObservacion(clean(request.observacion()));
+        devolucion.setFechaDocumento(request.fechaDocumento());
+        devolucion.setNumeroNotaCredito(clean(request.numeroNotaCredito()));
+        devolucion.setUsuario(usuario);
+        MovimientoInventarioEntity guardado = movimientoInventarioRepository.save(devolucion);
+
+        for (DevolucionProveedorDetalleCreateRequest detalleRequest : request.detalles()) {
+            MovimientoDetalleEntity detalleOrigen = obtenerDetalleOrigenDeEntrada(
+                    entradaOrigen,
+                    detalleRequest.movimientoDetalleOrigenId()
+            );
+            validarDetalleDevolucionRequest(detalleRequest, detalleOrigen);
+            validarCantidadPendienteDevolucion(detalleOrigen, detalleRequest.cantidad());
+
+            MovimientoDetalleEntity detalle = new MovimientoDetalleEntity();
+            detalle.setMovimiento(guardado);
+            detalle.setMovimientoDetalleOrigen(detalleOrigen);
+            detalle.setProducto(detalleOrigen.getProducto());
+            detalle.setUbicacionOrigen(detalleOrigen.getUbicacionDestino());
+            detalle.setCantidad(detalleRequest.cantidad());
+            detalle.setObservacion(clean(detalleRequest.observacion()));
+            movimientoDetalleRepository.save(detalle);
+        }
+
+        if (Boolean.TRUE.equals(request.confirmar())) {
+            validarPermisoDevolucionConfirmar(authentication);
+            MovimientoInventarioEntity confirmado = confirmarMovimiento(guardado);
+            return toResponse(confirmado);
+        }
+
+        return toResponse(guardado);
+    }
+
     @Transactional(readOnly = true)
     public MovimientoInventarioResponse obtener(Long movimientoId) {
         MovimientoInventarioEntity movimiento = movimientoInventarioRepository.findById(movimientoId)
                 .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado"));
         return toResponse(movimiento);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MovimientoInventarioResponse> listarDevolucionesPorEntrada(Long entradaId) {
+        obtenerEntradaProveedorOrigen(entradaId, false);
+        return movimientoInventarioRepository.findByMovimientoOrigenIdOrderByFechaMovimientoDescIdDesc(entradaId)
+                .stream()
+                .filter(movimiento -> movimiento.getTipoMovimiento() == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR)
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MovimientoDetalleDevolucionPendienteResponse> obtenerCantidadesDevolucion(Long entradaId) {
+        MovimientoInventarioEntity entrada = obtenerEntradaProveedorOrigen(entradaId, false);
+        List<MovimientoDetalleEntity> detalles = movimientoDetalleRepository.findByMovimientoIdOrderByIdAsc(entrada.getId());
+        return detalles.stream()
+                .map(detalle -> toDetalleDevolucionPendiente(entrada, detalle))
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -203,6 +293,13 @@ public class MovimientoInventarioService {
         }
 
         validarCabeceraConfirmacion(movimiento);
+        if (movimiento.getTipoMovimiento() == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR) {
+            confirmarDevolucionProveedor(movimiento, detalles);
+            movimiento.setEstado(EstadoMovimientoInventario.CONFIRMADO);
+            movimiento.setConfirmadoEn(LocalDateTime.now());
+            return movimiento;
+        }
+
         for (MovimientoDetalleEntity detalle : detalles) {
             confirmarDetalle(movimiento, detalle);
         }
@@ -240,8 +337,8 @@ public class MovimientoInventarioService {
             MovimientoAnulacionRequest request,
             Authentication authentication
     ) {
-        validarPermisoAnulacion(authentication);
         MovimientoInventarioEntity movimiento = obtenerMovimientoParaActualizar(movimientoId);
+        validarPermisoAnulacion(authentication, movimiento.getTipoMovimiento());
         MovimientoInventarioEntity anulado = anularMovimiento(movimiento, request.motivo());
         return toResponse(anulado);
     }
@@ -311,10 +408,39 @@ public class MovimientoInventarioService {
         detalle.setUbicacionOrigen(ubicacionOrigen);
         detalle.setUbicacionDestino(ubicacionDestino);
         detalle.setCantidad(request.cantidad());
-        detalle.setCostoUnitario(request.costoUnitario());
-        detalle.setTotalLinea(calcularTotalLinea(request.cantidad(), request.costoUnitario()));
+        if (esEntrada(movimiento.getTipoMovimiento())) {
+            aplicarCostoInventariableEntrada(detalle, request);
+        } else {
+            detalle.setCostoUnitario(request.costoUnitario());
+            detalle.setTotalLinea(calcularTotalLinea(request.cantidad(), request.costoUnitario()));
+        }
         detalle.setObservacion(clean(request.observacion()));
         return detalle;
+    }
+
+    private void aplicarCostoInventariableEntrada(
+            MovimientoDetalleEntity detalle,
+            MovimientoDetalleCreateRequest request
+    ) {
+        CostoInventariableService.Resultado costo = costoInventariableService.calcularDetalleEntrada(
+                request.cantidad(),
+                request.costoUnitario(),
+                request.valorUnitarioSinIgv(),
+                request.tasaIgv(),
+                request.igvRecuperable()
+        );
+
+        detalle.setValorUnitarioSinIgv(costo.valorUnitarioSinIgv());
+        detalle.setTasaIgv(costo.tasaIgv());
+        detalle.setMontoIgvUnitario(costo.montoIgvUnitario());
+        detalle.setMontoIgvTotal(costo.montoIgvTotal());
+        detalle.setPrecioUnitarioConIgv(costo.precioUnitarioConIgv());
+        detalle.setIgvRecuperable(costo.igvRecuperable());
+        detalle.setCostoUnitarioInventariable(costo.costoUnitarioInventariable());
+        detalle.setTotalInventariable(costo.totalInventariable());
+        detalle.setTotalConIgv(costo.totalConIgv());
+        detalle.setCostoUnitario(costo.costoUnitarioInventariable());
+        detalle.setTotalLinea(costo.totalInventariable());
     }
 
     private void validarRequestCabecera(MovimientoInventarioCreateRequest request) {
@@ -369,6 +495,9 @@ public class MovimientoInventarioService {
                 requerirTexto(request.motivoMovimiento(), "El ajuste negativo requiere motivo");
                 requerirTexto(request.observacion(), "El ajuste negativo requiere observacion");
             }
+            case DEVOLUCION_PROVEEDOR -> throw new BusinessException(
+                    "Use el endpoint de devoluciones a proveedor para registrar este tipo de movimiento"
+            );
         }
 
         for (MovimientoDetalleCreateRequest detalle : request.detalles()) {
@@ -387,8 +516,16 @@ public class MovimientoInventarioService {
         if (detalle.costoUnitario() != null && detalle.costoUnitario().compareTo(BigDecimal.ZERO) < 0) {
             throw new BusinessException("El costo unitario no puede ser negativo");
         }
-        if (tipoMovimiento == TipoMovimientoInventario.ENTRADA_COMPRA && detalle.costoUnitario() == null) {
-            throw new BusinessException("La entrada por compra requiere costo unitario por linea");
+        if (detalle.valorUnitarioSinIgv() != null && detalle.valorUnitarioSinIgv().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("El valor unitario sin IGV no puede ser negativo");
+        }
+        if (detalle.tasaIgv() != null && detalle.tasaIgv().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("La tasa IGV no puede ser negativa");
+        }
+        if (tipoMovimiento == TipoMovimientoInventario.ENTRADA_COMPRA
+                && detalle.costoUnitario() == null
+                && detalle.valorUnitarioSinIgv() == null) {
+            throw new BusinessException("La entrada por compra requiere valor unitario sin IGV o costo unitario por linea");
         }
     }
 
@@ -415,6 +552,173 @@ public class MovimientoInventarioService {
                 && request.fechaRecepcion().isBefore(request.fechaPedido())) {
             throw new BusinessException("La fecha de recepcion no puede ser menor que la fecha de pedido");
         }
+    }
+
+    private void validarRequestDevolucionProveedor(DevolucionProveedorCreateRequest request) {
+        if (request == null) {
+            throw new BusinessException("La devolucion al proveedor es obligatoria");
+        }
+        requerir(request.movimientoOrigenId(), "La devolucion al proveedor requiere movimiento origen");
+        requerir(request.fechaMovimiento(), "La fecha del movimiento es obligatoria");
+        requerirTexto(request.motivo(), "La devolucion al proveedor requiere motivo");
+        if (request.detalles() == null || request.detalles().isEmpty()) {
+            throw new BusinessException("La devolucion al proveedor debe tener al menos un detalle");
+        }
+
+        Set<Long> detallesOrigen = new HashSet<>();
+        for (DevolucionProveedorDetalleCreateRequest detalle : request.detalles()) {
+            if (detalle == null) {
+                throw new BusinessException("El detalle de devolucion es obligatorio");
+            }
+            requerir(detalle.movimientoDetalleOrigenId(), "El detalle origen es obligatorio");
+            requerir(detalle.productoId(), "El producto del detalle es obligatorio");
+            if (detalle.cantidad() == null || detalle.cantidad().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BusinessException("La cantidad a devolver debe ser mayor que cero");
+            }
+            if (!detallesOrigen.add(detalle.movimientoDetalleOrigenId())) {
+                throw new BusinessException("No se puede repetir una linea origen en la devolucion");
+            }
+        }
+    }
+
+    private void validarDetalleDevolucionRequest(
+            DevolucionProveedorDetalleCreateRequest request,
+            MovimientoDetalleEntity detalleOrigen
+    ) {
+        if (!detalleOrigen.getProducto().getId().equals(request.productoId())) {
+            throw new BusinessException("El producto de la devolucion no pertenece al detalle origen indicado");
+        }
+        if (!detalleOrigen.getProducto().isActivo()) {
+            throw new BusinessException("No se puede devolver un producto inactivo");
+        }
+    }
+
+    private MovimientoInventarioEntity obtenerEntradaProveedorOrigen(Long movimientoOrigenId, boolean forUpdate) {
+        MovimientoInventarioEntity entrada = (forUpdate
+                ? movimientoInventarioRepository.findByIdForUpdate(movimientoOrigenId)
+                : movimientoInventarioRepository.findById(movimientoOrigenId))
+                .orElseThrow(() -> new ResourceNotFoundException("Entrada origen no encontrada"));
+        if (entrada.getTipoMovimiento() != TipoMovimientoInventario.ENTRADA_COMPRA) {
+            throw new BusinessException("Solo se puede devolver mercaderia de una entrada por compra");
+        }
+        if (entrada.getEstado() != EstadoMovimientoInventario.CONFIRMADO) {
+            throw new BusinessException("La entrada origen debe estar confirmada");
+        }
+        if (entrada.getProveedor() == null) {
+            throw new BusinessException("La entrada origen no tiene proveedor asociado");
+        }
+        if (entrada.getAlmacenDestino() == null) {
+            throw new BusinessException("La entrada origen no tiene almacen destino asociado");
+        }
+        return entrada;
+    }
+
+    private ProveedorEntity resolverProveedorDevolucion(Long proveedorId, MovimientoInventarioEntity entradaOrigen) {
+        ProveedorEntity proveedorOrigen = entradaOrigen.getProveedor();
+        if (proveedorId != null && !proveedorOrigen.getId().equals(proveedorId)) {
+            throw new BusinessException("El proveedor de la devolucion debe coincidir con el proveedor de la entrada origen");
+        }
+        return proveedorOrigen;
+    }
+
+    private void validarProveedorCoincideConEntrada(
+            ProveedorEntity proveedor,
+            MovimientoInventarioEntity entradaOrigen
+    ) {
+        if (proveedor == null || !proveedor.getId().equals(entradaOrigen.getProveedor().getId())) {
+            throw new BusinessException("El proveedor de la devolucion debe coincidir con el proveedor de la entrada origen");
+        }
+    }
+
+    private MovimientoDetalleEntity obtenerDetalleOrigenDeEntrada(
+            MovimientoInventarioEntity entradaOrigen,
+            Long detalleOrigenId
+    ) {
+        MovimientoDetalleEntity detalleOrigen = movimientoDetalleRepository.findById(detalleOrigenId)
+                .orElseThrow(() -> new ResourceNotFoundException("Detalle origen no encontrado"));
+        if (!detalleOrigen.getMovimiento().getId().equals(entradaOrigen.getId())) {
+            throw new BusinessException("El detalle origen no pertenece a la entrada indicada");
+        }
+        return detalleOrigen;
+    }
+
+    private MovimientoDetalleEntity validarDetalleOrigenDeDevolucion(
+            MovimientoInventarioEntity entradaOrigen,
+            MovimientoDetalleEntity detalle
+    ) {
+        MovimientoDetalleEntity detalleOrigen = detalle.getMovimientoDetalleOrigen();
+        if (detalleOrigen == null) {
+            throw new BusinessException("La devolucion requiere detalle origen por linea");
+        }
+        if (!detalleOrigen.getMovimiento().getId().equals(entradaOrigen.getId())) {
+            throw new BusinessException("El detalle origen no pertenece a la entrada indicada");
+        }
+        if (!detalleOrigen.getProducto().getId().equals(detalle.getProducto().getId())) {
+            throw new BusinessException("El producto de la devolucion no coincide con el detalle origen");
+        }
+        return detalleOrigen;
+    }
+
+    private void validarDetallesDevolucionSinDuplicados(List<MovimientoDetalleEntity> detalles) {
+        Set<Long> detallesOrigen = new HashSet<>();
+        for (MovimientoDetalleEntity detalle : detalles) {
+            MovimientoDetalleEntity detalleOrigen = detalle.getMovimientoDetalleOrigen();
+            if (detalleOrigen == null || !detallesOrigen.add(detalleOrigen.getId())) {
+                throw new BusinessException("No se puede repetir una linea origen en la devolucion");
+            }
+        }
+    }
+
+    private void validarCantidadPendienteDevolucion(
+            MovimientoDetalleEntity detalleOrigen,
+            BigDecimal cantidadSolicitada
+    ) {
+        BigDecimal pendiente = calcularCantidadPendienteDevolver(detalleOrigen);
+        if (cantidadSolicitada.compareTo(pendiente) > 0) {
+            throw new BusinessException("La cantidad a devolver supera la cantidad pendiente de la entrada origen");
+        }
+    }
+
+    private BigDecimal calcularCantidadPendienteDevolver(MovimientoDetalleEntity detalleOrigen) {
+        BigDecimal cantidadDevuelta = movimientoDetalleRepository.sumCantidadByDetalleOrigenAndMovimientoTipoAndEstado(
+                detalleOrigen.getId(),
+                TipoMovimientoInventario.DEVOLUCION_PROVEEDOR,
+                EstadoMovimientoInventario.CONFIRMADO
+        );
+        BigDecimal devuelta = cantidadDevuelta == null ? BigDecimal.ZERO : cantidadDevuelta;
+        return detalleOrigen.getCantidad().subtract(devuelta);
+    }
+
+    private MovimientoDetalleDevolucionPendienteResponse toDetalleDevolucionPendiente(
+            MovimientoInventarioEntity entrada,
+            MovimientoDetalleEntity detalle
+    ) {
+        BigDecimal devuelta = movimientoDetalleRepository.sumCantidadByDetalleOrigenAndMovimientoTipoAndEstado(
+                detalle.getId(),
+                TipoMovimientoInventario.DEVOLUCION_PROVEEDOR,
+                EstadoMovimientoInventario.CONFIRMADO
+        );
+        BigDecimal cantidadDevuelta = devuelta == null ? BigDecimal.ZERO : devuelta;
+        BigDecimal pendiente = detalle.getCantidad().subtract(cantidadDevuelta);
+        AlmacenEntity almacen = entrada.getAlmacenDestino();
+        UbicacionAlmacenEntity ubicacion = detalle.getUbicacionDestino();
+        ProductoEntity producto = detalle.getProducto();
+        return new MovimientoDetalleDevolucionPendienteResponse(
+                detalle.getId(),
+                producto.getId(),
+                producto.getCodigo(),
+                producto.getNombre(),
+                almacen.getId(),
+                almacen.getCodigo(),
+                almacen.getNombre(),
+                ubicacion == null ? null : ubicacion.getId(),
+                ubicacion == null ? null : ubicacion.getCodigo(),
+                ubicacion == null ? null : ubicacion.getNombre(),
+                detalle.getCantidad(),
+                cantidadDevuelta,
+                pendiente,
+                detalle.getCostoUnitario()
+        );
     }
 
     private void validarSerieNumero(String serie, String numero, String mensaje) {
@@ -521,13 +825,15 @@ public class MovimientoInventarioService {
         UbicacionAlmacenEntity ubicacionDestino = detalle.getUbicacionDestino();
         validarAlmacenActivo(almacenDestino, "almacen destino");
         validarUbicacionActivaYCoherente(ubicacionDestino, almacenDestino, "ubicacion destino");
+        BigDecimal costoInventariable = resolverCostoUnitarioInventariable(detalle);
+        completarCostoInventariableHistorico(detalle, costoInventariable);
 
         StockService.StockResultado stockResultado = stockService.registrarEntrada(
                 detalle.getProducto(),
                 almacenDestino,
                 ubicacionDestino,
                 detalle.getCantidad(),
-                detalle.getCostoUnitario(),
+                costoInventariable,
                 movimiento.getFechaMovimiento()
         );
 
@@ -628,6 +934,78 @@ public class MovimientoInventarioService {
         );
     }
 
+    private void confirmarDevolucionProveedor(
+            MovimientoInventarioEntity movimiento,
+            List<MovimientoDetalleEntity> detalles
+    ) {
+        MovimientoInventarioEntity entradaOrigen = obtenerEntradaProveedorOrigen(
+                movimiento.getMovimientoOrigen().getId(),
+                true
+        );
+        validarProveedorCoincideConEntrada(movimiento.getProveedor(), entradaOrigen);
+        validarDetallesDevolucionSinDuplicados(detalles);
+
+        List<MovimientoDetalleEntity> detallesOrdenados = detalles.stream()
+                .sorted(Comparator.comparing((MovimientoDetalleEntity detalle) -> detalle.getProducto().getId())
+                        .thenComparing(detalle -> movimiento.getAlmacenOrigen().getId())
+                        .thenComparing(detalle -> detalle.getUbicacionOrigen() == null ? 0L : detalle.getUbicacionOrigen().getId())
+                        .thenComparing(MovimientoDetalleEntity::getId))
+                .toList();
+
+        for (MovimientoDetalleEntity detalle : detallesOrdenados) {
+            validarDetalle(movimiento, detalle);
+            confirmarDetalleDevolucionProveedor(movimiento, entradaOrigen, detalle);
+        }
+    }
+
+    private void confirmarDetalleDevolucionProveedor(
+            MovimientoInventarioEntity movimiento,
+            MovimientoInventarioEntity entradaOrigen,
+            MovimientoDetalleEntity detalle
+    ) {
+        MovimientoDetalleEntity detalleOrigen = validarDetalleOrigenDeDevolucion(entradaOrigen, detalle);
+        AlmacenEntity almacen = entradaOrigen.getAlmacenDestino();
+        UbicacionAlmacenEntity ubicacion = detalleOrigen.getUbicacionDestino();
+        validarAlmacenActivo(almacen, "almacen origen de devolucion");
+        validarUbicacionActivaYCoherente(ubicacion, almacen, "ubicacion origen de devolucion");
+        validarCantidadPendienteDevolucion(detalleOrigen, detalle.getCantidad());
+
+        StockService.StockResultado stockResultado = stockService.registrarSalidaDevolucionProveedor(
+                detalle.getProducto(),
+                almacen,
+                ubicacion,
+                detalle.getCantidad(),
+                movimiento.getFechaMovimiento()
+        );
+
+        BigDecimal costoStockUnitario = stockResultado.costoUnitario();
+        BigDecimal costoDocumentoUnitario = resolverCostoUnitarioInventariable(detalleOrigen);
+        if (costoDocumentoUnitario == null) {
+            throw new BusinessException("El detalle de entrada origen no tiene costo unitario documental");
+        }
+
+        BigDecimal valorStock = calcularValor(detalle.getCantidad(), costoStockUnitario);
+        BigDecimal valorDocumento = calcularValor(detalle.getCantidad(), costoDocumentoUnitario);
+        detalle.setCostoUnitario(costoStockUnitario);
+        detalle.setTotalLinea(valorStock);
+        detalle.setCostoDocumentoUnitario(costoDocumentoUnitario);
+        detalle.setValorStock(valorStock);
+        detalle.setValorDocumento(valorDocumento);
+        detalle.setDiferenciaValorizacion(valorDocumento.subtract(valorStock));
+        movimientoDetalleRepository.save(detalle);
+
+        kardexService.registrar(
+                movimiento,
+                detalle,
+                almacen,
+                ubicacion,
+                BigDecimal.ZERO,
+                detalle.getCantidad(),
+                stockResultado,
+                resolverObservacion(movimiento, detalle)
+        );
+    }
+
     private void anularDetalle(
             MovimientoInventarioEntity movimiento,
             MovimientoDetalleEntity detalle,
@@ -637,6 +1015,10 @@ public class MovimientoInventarioService {
         validarDetalle(movimiento, detalle);
 
         TipoMovimientoInventario tipoMovimiento = movimiento.getTipoMovimiento();
+        if (tipoMovimiento == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR) {
+            anularDevolucionProveedor(movimiento, detalle, motivo, fechaAnulacion);
+            return;
+        }
         if (esEntrada(tipoMovimiento)) {
             anularEntrada(movimiento, detalle, motivo, fechaAnulacion);
             return;
@@ -675,7 +1057,9 @@ public class MovimientoInventarioService {
         StockService.StockResultado stockResultado = stockService.revertirEntrada(
                 stockBloqueado,
                 detalle.getCantidad(),
-                detalle.getCostoUnitario(),
+                kardexOriginal.getCostoUnitario() != null
+                        ? kardexOriginal.getCostoUnitario()
+                        : resolverCostoUnitarioInventariable(detalle),
                 fechaAnulacion
         );
 
@@ -686,6 +1070,44 @@ public class MovimientoInventarioService {
                 ubicacionDestino,
                 BigDecimal.ZERO,
                 detalle.getCantidad(),
+                stockResultado,
+                observacionAnulacion(movimiento, motivo)
+        );
+    }
+
+    private void anularDevolucionProveedor(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            String motivo,
+            LocalDateTime fechaAnulacion
+    ) {
+        AlmacenEntity almacenOrigen = movimiento.getAlmacenOrigen();
+        UbicacionAlmacenEntity ubicacionOrigen = detalle.getUbicacionOrigen();
+        validarAlmacenActivo(almacenOrigen, "almacen origen de devolucion");
+        validarUbicacionActivaYCoherente(ubicacionOrigen, almacenOrigen, "ubicacion origen de devolucion");
+
+        StockActualEntity stockBloqueado = stockService.bloquearStock(
+                detalle.getProducto(),
+                almacenOrigen,
+                ubicacionOrigen
+        );
+        KardexEntity kardexOriginal = obtenerKardexOriginalSalidaDevolucion(movimiento, detalle, almacenOrigen, ubicacionOrigen);
+        validarSinMovimientosPosteriores(kardexOriginal, movimiento, MENSAJE_ANULACION_DEVOLUCION_CON_POSTERIORES);
+
+        StockService.StockResultado stockResultado = stockService.revertirSalida(
+                stockBloqueado,
+                detalle.getCantidad(),
+                kardexOriginal.getCostoUnitario(),
+                fechaAnulacion
+        );
+
+        kardexService.registrar(
+                movimiento,
+                detalle,
+                almacenOrigen,
+                ubicacionOrigen,
+                detalle.getCantidad(),
+                BigDecimal.ZERO,
                 stockResultado,
                 observacionAnulacion(movimiento, motivo)
         );
@@ -829,6 +1251,18 @@ public class MovimientoInventarioService {
         if (movimiento.getTipoMovimiento() == TipoMovimientoInventario.ENTRADA_COMPRA && movimiento.getProveedor() == null) {
             throw new BusinessException("La entrada por compra requiere proveedor");
         }
+        if (movimiento.getTipoMovimiento() == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR) {
+            if (movimiento.getMovimientoOrigen() == null) {
+                throw new BusinessException("La devolucion al proveedor requiere movimiento origen");
+            }
+            if (movimiento.getProveedor() == null) {
+                throw new BusinessException("La devolucion al proveedor requiere proveedor");
+            }
+            if (movimiento.getAlmacenOrigen() == null) {
+                throw new BusinessException("La devolucion al proveedor requiere almacen origen");
+            }
+            return;
+        }
         if (esEntrada(movimiento.getTipoMovimiento()) && movimiento.getAlmacenDestino() == null) {
             throw new BusinessException("El movimiento requiere almacen destino");
         }
@@ -885,6 +1319,11 @@ public class MovimientoInventarioService {
                     "El ajuste negativo requiere motivo",
                     "El ajuste negativo requiere observacion"
             );
+            case DEVOLUCION_PROVEEDOR -> {
+                if (!hasText(movimiento.getMotivoMovimiento())) {
+                    throw new BusinessException("La devolucion al proveedor requiere motivo");
+                }
+            }
         }
     }
 
@@ -912,8 +1351,15 @@ public class MovimientoInventarioService {
         if (detalle.getCostoUnitario() != null && detalle.getCostoUnitario().compareTo(BigDecimal.ZERO) < 0) {
             throw new BusinessException("El costo unitario no puede ser negativo");
         }
-        if (movimiento.getTipoMovimiento() == TipoMovimientoInventario.ENTRADA_COMPRA && detalle.getCostoUnitario() == null) {
-            throw new BusinessException("La entrada por compra requiere costo unitario por linea");
+        if (detalle.getValorUnitarioSinIgv() != null && detalle.getValorUnitarioSinIgv().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("El valor unitario sin IGV no puede ser negativo");
+        }
+        if (detalle.getTasaIgv() != null && detalle.getTasaIgv().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("La tasa IGV no puede ser negativa");
+        }
+        if (movimiento.getTipoMovimiento() == TipoMovimientoInventario.ENTRADA_COMPRA
+                && resolverCostoUnitarioInventariable(detalle) == null) {
+            throw new BusinessException("La entrada por compra requiere valor unitario sin IGV o costo unitario por linea");
         }
     }
 
@@ -950,6 +1396,7 @@ public class MovimientoInventarioService {
             case SALIDA_CONSUMO, SALIDA_VENTA, SALIDA_AJUSTE -> INVENTARIO_SALIDA;
             case TRANSFERENCIA -> INVENTARIO_TRANSFERENCIA;
             case AJUSTE_POSITIVO, AJUSTE_NEGATIVO -> INVENTARIO_AJUSTE;
+            case DEVOLUCION_PROVEEDOR -> INVENTARIO_DEVOLUCION_CONFIRMAR;
         };
 
         if (!authorities.contains(permisoRequerido)) {
@@ -957,9 +1404,33 @@ public class MovimientoInventarioService {
         }
     }
 
-    private void validarPermisoAnulacion(Authentication authentication) {
+    private void validarPermisoDevolucionCrear(Authentication authentication) {
+        validarPermiso(authentication, INVENTARIO_DEVOLUCION_CREAR, "No tiene permisos para crear devoluciones a proveedor");
+    }
+
+    private void validarPermisoDevolucionConfirmar(Authentication authentication) {
+        validarPermiso(authentication, INVENTARIO_DEVOLUCION_CONFIRMAR, "No tiene permisos para confirmar devoluciones a proveedor");
+    }
+
+    private void validarPermiso(Authentication authentication, String permiso, String mensaje) {
         Set<String> authorities = obtenerAuthorities(authentication);
-        if (authorities.contains(ROLE_ADMIN) || authorities.contains(INVENTARIO_AJUSTE)) {
+        if (authorities.contains(ROLE_ADMIN) || authorities.contains(permiso)) {
+            return;
+        }
+        throw new BusinessException(mensaje);
+    }
+
+    private void validarPermisoAnulacion(Authentication authentication, TipoMovimientoInventario tipoMovimiento) {
+        Set<String> authorities = obtenerAuthorities(authentication);
+        if (authorities.contains(ROLE_ADMIN)) {
+            return;
+        }
+        if (tipoMovimiento == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR
+                && authorities.contains(INVENTARIO_DEVOLUCION_ANULAR)) {
+            return;
+        }
+        if (tipoMovimiento != TipoMovimientoInventario.DEVOLUCION_PROVEEDOR
+                && authorities.contains(INVENTARIO_AJUSTE)) {
             return;
         }
         throw new BusinessException("No tiene permisos para anular movimientos");
@@ -971,7 +1442,9 @@ public class MovimientoInventarioService {
                 || authorities.contains(INVENTARIO_AJUSTE)
                 || authorities.contains(INVENTARIO_ENTRADA)
                 || authorities.contains(INVENTARIO_SALIDA)
-                || authorities.contains(INVENTARIO_TRANSFERENCIA)) {
+                || authorities.contains(INVENTARIO_TRANSFERENCIA)
+                || authorities.contains(INVENTARIO_DEVOLUCION_CREAR)
+                || authorities.contains(INVENTARIO_DEVOLUCION_CONFIRMAR)) {
             return;
         }
         throw new BusinessException("No tiene permisos para cancelar movimientos");
@@ -997,7 +1470,8 @@ public class MovimientoInventarioService {
         return tipoMovimiento == TipoMovimientoInventario.SALIDA_CONSUMO
                 || tipoMovimiento == TipoMovimientoInventario.SALIDA_VENTA
                 || tipoMovimiento == TipoMovimientoInventario.SALIDA_AJUSTE
-                || tipoMovimiento == TipoMovimientoInventario.AJUSTE_NEGATIVO;
+                || tipoMovimiento == TipoMovimientoInventario.AJUSTE_NEGATIVO
+                || tipoMovimiento == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR;
     }
 
     private Specification<MovimientoInventarioEntity> buildSpecification(
@@ -1024,6 +1498,8 @@ public class MovimientoInventarioService {
             }
             if (textoNormalizado != null) {
                 String pattern = "%" + textoNormalizado.toLowerCase(Locale.ROOT) + "%";
+                jakarta.persistence.criteria.Join<MovimientoInventarioEntity, MovimientoInventarioEntity> movimientoOrigenJoin =
+                        root.join("movimientoOrigen", jakarta.persistence.criteria.JoinType.LEFT);
                 jakarta.persistence.criteria.Subquery<Long> detalleSubquery = query.subquery(Long.class);
                 jakarta.persistence.criteria.Root<MovimientoDetalleEntity> detalleRoot = detalleSubquery.from(MovimientoDetalleEntity.class);
                 detalleSubquery.select(detalleRoot.get("movimiento").get("id"))
@@ -1055,6 +1531,8 @@ public class MovimientoInventarioService {
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("ordenCompra")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("observacionDocumentaria")), pattern),
                         criteriaBuilder.like(criteriaBuilder.lower(root.get("observacion")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("numeroNotaCredito")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(movimientoOrigenJoin.get("numero")), pattern),
                         criteriaBuilder.exists(detalleSubquery)
                 ));
             }
@@ -1086,6 +1564,7 @@ public class MovimientoInventarioService {
         ProveedorEntity proveedor = movimiento.getProveedor();
         AlmacenEntity almacenOrigen = movimiento.getAlmacenOrigen();
         AlmacenEntity almacenDestino = movimiento.getAlmacenDestino();
+        MovimientoInventarioEntity movimientoOrigen = movimiento.getMovimientoOrigen();
         UsuarioEntity usuario = movimiento.getUsuario();
 
         return new MovimientoInventarioResponse(
@@ -1093,6 +1572,8 @@ public class MovimientoInventarioService {
                 movimiento.getNumero(),
                 movimiento.getTipoMovimiento(),
                 movimiento.getEstado(),
+                movimientoOrigen == null ? null : movimientoOrigen.getId(),
+                movimientoOrigen == null ? null : movimientoOrigen.getNumero(),
                 movimiento.getFechaMovimiento(),
                 proveedor == null ? null : proveedor.getId(),
                 proveedor == null ? null : proveedor.getNumeroDocumento(),
@@ -1131,6 +1612,8 @@ public class MovimientoInventarioService {
                 movimiento.getMovilidad(),
                 movimiento.getOtrosGastos(),
                 movimiento.getObservacionDocumentaria(),
+                movimiento.getFechaDocumento(),
+                movimiento.getNumeroNotaCredito(),
                 usuario == null ? null : usuario.getId(),
                 usuario == null ? null : usuario.getUsername(),
                 movimiento.getConfirmadoEn(),
@@ -1160,9 +1643,23 @@ public class MovimientoInventarioService {
                 ubicacionDestino == null ? null : ubicacionDestino.getId(),
                 ubicacionDestino == null ? null : ubicacionDestino.getCodigo(),
                 ubicacionDestino == null ? null : ubicacionDestino.getNombre(),
+                detalle.getMovimientoDetalleOrigen() == null ? null : detalle.getMovimientoDetalleOrigen().getId(),
                 detalle.getCantidad(),
                 detalle.getCostoUnitario(),
+                detalle.getValorUnitarioSinIgv(),
+                detalle.getTasaIgv(),
+                detalle.getMontoIgvUnitario(),
+                detalle.getMontoIgvTotal(),
+                detalle.getPrecioUnitarioConIgv(),
+                detalle.getIgvRecuperable(),
+                resolverCostoUnitarioInventariable(detalle),
+                resolverTotalInventariable(detalle),
+                detalle.getTotalConIgv(),
                 detalle.getTotalLinea(),
+                detalle.getCostoDocumentoUnitario(),
+                detalle.getValorStock(),
+                detalle.getValorDocumento(),
+                detalle.getDiferenciaValorizacion(),
                 detalle.getObservacion(),
                 detalle.getCreadoEn(),
                 detalle.getActualizadoEn()
@@ -1187,11 +1684,51 @@ public class MovimientoInventarioService {
                 .orElse(null);
     }
 
+    private BigDecimal resolverCostoUnitarioInventariable(MovimientoDetalleEntity detalle) {
+        return detalle.getCostoUnitarioInventariable() != null
+                ? detalle.getCostoUnitarioInventariable()
+                : detalle.getCostoUnitario();
+    }
+
+    private BigDecimal resolverTotalInventariable(MovimientoDetalleEntity detalle) {
+        return detalle.getTotalInventariable() != null
+                ? detalle.getTotalInventariable()
+                : detalle.getTotalLinea();
+    }
+
+    private void completarCostoInventariableHistorico(
+            MovimientoDetalleEntity detalle,
+            BigDecimal costoUnitarioInventariable
+    ) {
+        if (costoUnitarioInventariable == null) {
+            return;
+        }
+        if (detalle.getCostoUnitarioInventariable() == null) {
+            detalle.setCostoUnitarioInventariable(costoUnitarioInventariable);
+        }
+        if (detalle.getCostoUnitario() == null) {
+            detalle.setCostoUnitario(costoUnitarioInventariable);
+        }
+        if (detalle.getTotalInventariable() == null) {
+            detalle.setTotalInventariable(calcularValor(detalle.getCantidad(), costoUnitarioInventariable));
+        }
+        if (detalle.getTotalLinea() == null) {
+            detalle.setTotalLinea(detalle.getTotalInventariable());
+        }
+    }
+
     private BigDecimal calcularTotalLinea(BigDecimal cantidad, BigDecimal costoUnitario) {
         if (cantidad == null || costoUnitario == null) {
             return null;
         }
         return cantidad.multiply(costoUnitario);
+    }
+
+    private BigDecimal calcularValor(BigDecimal cantidad, BigDecimal costoUnitario) {
+        if (cantidad == null || costoUnitario == null) {
+            return null;
+        }
+        return cantidad.multiply(costoUnitario).setScale(COST_SCALE, RoundingMode.HALF_UP);
     }
 
     private String resolverObservacion(MovimientoInventarioEntity movimiento, MovimientoDetalleEntity detalle) {
@@ -1218,15 +1755,38 @@ public class MovimientoInventarioService {
                 .orElseThrow(() -> new BusinessException("No se encontro kardex original para anular la entrada"));
     }
 
+    private KardexEntity obtenerKardexOriginalSalidaDevolucion(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            AlmacenEntity almacen,
+            UbicacionAlmacenEntity ubicacion
+    ) {
+        return kardexService.findByMovimientoDetalle(movimiento.getId(), detalle.getId()).stream()
+                .filter(kardex -> kardex.getProducto().getId().equals(detalle.getProducto().getId()))
+                .filter(kardex -> kardex.getAlmacen().getId().equals(almacen.getId()))
+                .filter(kardex -> mismaUbicacion(kardex.getUbicacion(), ubicacion))
+                .filter(kardex -> kardex.getSalida().compareTo(BigDecimal.ZERO) > 0)
+                .findFirst()
+                .orElseThrow(() -> new BusinessException("No se encontro kardex original para anular la devolucion"));
+    }
+
     private void validarSinMovimientosPosteriores(
             KardexEntity kardexOriginal,
             MovimientoInventarioEntity movimiento
+    ) {
+        validarSinMovimientosPosteriores(kardexOriginal, movimiento, MENSAJE_ANULACION_ENTRADA_CON_POSTERIORES);
+    }
+
+    private void validarSinMovimientosPosteriores(
+            KardexEntity kardexOriginal,
+            MovimientoInventarioEntity movimiento,
+            String mensaje
     ) {
         boolean existePosterior = kardexOriginal.getUbicacion() == null
                 ? kardexService.existsPosteriorSinUbicacion(kardexOriginal, movimiento.getId())
                 : kardexService.existsPosteriorConUbicacion(kardexOriginal, movimiento.getId());
         if (existePosterior) {
-            throw new BusinessException(MENSAJE_ANULACION_ENTRADA_CON_POSTERIORES);
+            throw new BusinessException(mensaje);
         }
     }
 

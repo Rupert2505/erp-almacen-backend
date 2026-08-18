@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="footer">
+    <div class="signatures">
+        <div class="signature">ENTREGADO POR</div>
+        <div class="signature">RECIBIDO POR</div>
+        <div class="signature">REVISADO POR</div>
+    </div>
+    <div class="footer">
+        <span>Generado por </span><span th:text="${generadoPor}">sistema</span>
+        <span> - </span>
+        <span th:text="${#temporals.format(generadoEn, 'yyyy-MM-dd HH:mm')}">2026-01-01 00:00</span>
+        <span class="page-info">Pagina <span class="pageNumber"></span> de <span class="totalPages"></span></span>
+    </div>
+</div>
+</body>
+</html>

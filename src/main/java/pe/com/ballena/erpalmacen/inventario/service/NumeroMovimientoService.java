@@ -1,42 +1,62 @@
 package pe.com.ballena.erpalmacen.inventario.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoCorrelativoEntity;
+import pe.com.ballena.erpalmacen.inventario.movimientos.repository.MovimientoCorrelativoRepository;
 import pe.com.ballena.erpalmacen.inventario.movimientos.repository.MovimientoInventarioRepository;
+import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 
-import java.security.SecureRandom;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 @Service
 public class NumeroMovimientoService {
 
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-    private static final String ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    private static final int RANDOM_LENGTH = 5;
-    private static final int MAX_ATTEMPTS = 10;
+    private static final String PREFIJO_MOVIMIENTO = "MOV";
+    private static final String PREFIJO_DEVOLUCION = "DEV";
+    private static final int CORRELATIVO_LENGTH = 6;
 
-    private final SecureRandom secureRandom = new SecureRandom();
     private final MovimientoInventarioRepository movimientoInventarioRepository;
+    private final MovimientoCorrelativoRepository movimientoCorrelativoRepository;
 
-    public NumeroMovimientoService(MovimientoInventarioRepository movimientoInventarioRepository) {
+    public NumeroMovimientoService(
+            MovimientoInventarioRepository movimientoInventarioRepository,
+            MovimientoCorrelativoRepository movimientoCorrelativoRepository
+    ) {
         this.movimientoInventarioRepository = movimientoInventarioRepository;
+        this.movimientoCorrelativoRepository = movimientoCorrelativoRepository;
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
     public String generar() {
-        for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            String numero = "MOV-" + LocalDateTime.now().format(FORMATTER) + "-" + randomSuffix();
-            if (!movimientoInventarioRepository.existsByNumero(numero)) {
-                return numero;
-            }
-        }
-        throw new IllegalStateException("No se pudo generar un numero de movimiento unico");
+        return generar(PREFIJO_MOVIMIENTO);
     }
 
-    private String randomSuffix() {
-        StringBuilder builder = new StringBuilder(RANDOM_LENGTH);
-        for (int i = 0; i < RANDOM_LENGTH; i++) {
-            builder.append(ALPHABET.charAt(secureRandom.nextInt(ALPHABET.length())));
+    @Transactional(propagation = Propagation.MANDATORY)
+    public String generar(TipoMovimientoInventario tipoMovimiento) {
+        if (tipoMovimiento == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR) {
+            return generar(PREFIJO_DEVOLUCION);
         }
-        return builder.toString();
+        return generar();
+    }
+
+    private String generar(String prefijo) {
+        MovimientoCorrelativoEntity correlativo = movimientoCorrelativoRepository.findByPrefijoForUpdate(prefijo)
+                .orElseThrow(() -> new IllegalStateException("No existe correlativo configurado para el prefijo " + prefijo));
+
+        long siguiente = correlativo.getUltimoCorrelativo() + 1;
+        String numero = construirNumero(prefijo, siguiente);
+        while (movimientoInventarioRepository.existsByNumero(numero)) {
+            siguiente++;
+            numero = construirNumero(prefijo, siguiente);
+        }
+
+        correlativo.setUltimoCorrelativo(siguiente);
+        return numero;
+    }
+
+    private String construirNumero(String prefijo, long correlativo) {
+        return prefijo + "-" + String.format(Locale.ROOT, "%0" + CORRELATIVO_LENGTH + "d", correlativo);
     }
 }

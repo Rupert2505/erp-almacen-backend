@@ -57,6 +57,12 @@ class SecurityEndpointIntegrationTest {
     }
 
     @Test
+    void pdfMovimientoSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(get("/api/reportes/inventario/movimientos/1/pdf"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void usuarioSinPermisoDevuelve403() throws Exception {
         UsuarioEntity usuario = crearUsuario("consulta", true, "CONSULTA");
         String token = jwtService.generateToken(usuario.getUsername(), List.of("CONSULTA"), List.of());
@@ -91,6 +97,24 @@ class SecurityEndpointIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{\"motivoCancelacion\":\"Error\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void crearDevolucionProveedorSinTokenDevuelve401() throws Exception {
+        mockMvc.perform(post("/api/inventario/movimientos/devoluciones-proveedor")
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void consultarDevolucionesProveedorUsuarioSinPermisoDevuelve403() throws Exception {
+        UsuarioEntity usuario = crearUsuario("consulta_devolucion", true, "CONSULTA");
+        String token = jwtService.generateToken(usuario.getUsername(), List.of("CONSULTA"), List.of());
+
+        mockMvc.perform(get("/api/inventario/movimientos/1/devoluciones")
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden());
     }
 

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="header">
+    <div class="header">
+        <div>
+            <div class="company" th:text="${empresa}">ERP Almacen</div>
+            <div class="muted">Sistema de almacen e inventario</div>
+        </div>
+        <div class="doc-title" th:text="${documentoNombre}">COMPROBANTE</div>
+    </div>
+</div>
+</body>
+</html>

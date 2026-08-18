@@ -4,14 +4,22 @@ import java.math.BigDecimal;
 
 public record StockValorizadoResponse(
         Long productoId,
-        String productoCodigo,
-        String productoNombre,
+        String codigoProducto,
+        String nombreProducto,
+        String familia,
+        String subfamilia,
+        String tipoArticulo,
+        String marca,
+        String unidadMedida,
         Long almacenId,
-        String almacenNombre,
+        String almacen,
         Long ubicacionId,
-        String ubicacionNombre,
+        String ubicacion,
         BigDecimal cantidadActual,
+        BigDecimal stockMinimo,
+        BigDecimal stockMaximo,
         BigDecimal costoPromedio,
-        BigDecimal valorTotal
+        BigDecimal valorTotal,
+        EstadoStockReporte estadoStock
 ) {
 }

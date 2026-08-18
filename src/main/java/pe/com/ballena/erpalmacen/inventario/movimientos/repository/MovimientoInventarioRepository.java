@@ -12,6 +12,7 @@ import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 
 public interface MovimientoInventarioRepository extends JpaRepository<MovimientoInventarioEntity, Long>,
@@ -32,4 +33,6 @@ public interface MovimientoInventarioRepository extends JpaRepository<Movimiento
     Page<MovimientoInventarioEntity> findByEstado(EstadoMovimientoInventario estado, Pageable pageable);
 
     Page<MovimientoInventarioEntity> findByTipoMovimiento(TipoMovimientoInventario tipoMovimiento, Pageable pageable);
+
+    List<MovimientoInventarioEntity> findByMovimientoOrigenIdOrderByFechaMovimientoDescIdDesc(Long movimientoOrigenId);
 }

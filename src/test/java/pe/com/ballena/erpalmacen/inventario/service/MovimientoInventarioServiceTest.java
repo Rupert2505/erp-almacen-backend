@@ -11,6 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.kardex.repository.KardexRepository;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorCreateRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
@@ -91,6 +93,63 @@ class MovimientoInventarioServiceTest {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
+
+    @Test
+    void crearMovimientosGeneraCodigoConPrefijoYCorrelativo() {
+        TestData data = crearDatosBase();
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+
+        var primero = movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                false,
+                "DOC-CORR-1-" + suffix,
+                new BigDecimal("1.0000"),
+                new BigDecimal("2.000000")
+        ), authentication());
+        var segundo = movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                false,
+                "DOC-CORR-2-" + suffix,
+                new BigDecimal("1.0000"),
+                new BigDecimal("2.000000")
+        ), authentication());
+
+        assertThat(primero.numero()).matches("MOV-[0-9]{6,}");
+        assertThat(segundo.numero()).matches("MOV-[0-9]{6,}");
+        assertThat(correlativoMovimiento(segundo.numero())).isEqualTo(correlativoMovimiento(primero.numero()) + 1);
+    }
+
+    @Test
+    void crearDevolucionesProveedorGeneraCorrelativoDevIndependiente() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "DOC-CORR-DEV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        Long detalleOrigenId = entrada.detalles().get(0).id();
+
+        var primera = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigenId,
+                data.producto().getId(),
+                new BigDecimal("1.0000"),
+                false
+        ), authentication());
+        var segunda = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigenId,
+                data.producto().getId(),
+                new BigDecimal("1.0000"),
+                false
+        ), authentication());
+
+        assertThat(primera.numero()).matches("DEV-[0-9]{6,}");
+        assertThat(segunda.numero()).matches("DEV-[0-9]{6,}");
+        assertThat(correlativoMovimiento(segunda.numero())).isEqualTo(correlativoMovimiento(primera.numero()) + 1);
+    }
 
     @Test
     void crearMovimientoCreaBorradorSinAfectarStockNiKardex() {
@@ -175,6 +234,195 @@ class MovimientoInventarioServiceTest {
         assertThat(stock.getCantidadActual()).isEqualByComparingTo("10.0000");
         assertThat(stock.getCostoPromedio()).isEqualByComparingTo("0.123456");
         assertThat(kardexRepository.findByMovimientoId(response.id())).hasSize(1);
+    }
+
+    @Test
+    void entradaCompraConIgvRecuperableNoIncluyeIgvEnStockNiKardex() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioCreateRequest request = crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "DOC-IGV-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.00"),
+                new BigDecimal("18.00"),
+                true,
+                new BigDecimal("118.000000")
+        );
+
+        var response = movimientoInventarioService.crearMovimiento(request, authentication());
+
+        var detalle = response.detalles().get(0);
+        assertThat(detalle.valorUnitarioSinIgv()).isEqualByComparingTo("100.00");
+        assertThat(detalle.tasaIgv()).isEqualByComparingTo("18.00");
+        assertThat(detalle.igvRecuperable()).isTrue();
+        assertThat(detalle.montoIgvUnitario()).isEqualByComparingTo("18.000000");
+        assertThat(detalle.precioUnitarioConIgv()).isEqualByComparingTo("118.000000");
+        assertThat(detalle.costoUnitario()).isEqualByComparingTo("100.00");
+        assertThat(detalle.costoUnitarioInventariable()).isEqualByComparingTo("100.00");
+        assertThat(detalle.totalInventariable()).isEqualByComparingTo("1000.000000");
+        assertThat(detalle.totalConIgv()).isEqualByComparingTo("1180.000000");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("100.000000");
+        assertThat(kardexRepository.findByMovimientoId(response.id()).get(0).getCostoUnitario())
+                .isEqualByComparingTo("100.000000");
+    }
+
+    @Test
+    void entradaCompraConIgvNoRecuperableIncluyeIgvEnCostoInventariable() {
+        TestData data = crearDatosBase();
+
+        var response = movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "DOC-IGV-NO-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.00"),
+                new BigDecimal("18.00"),
+                false,
+                null
+        ), authentication());
+
+        var detalle = response.detalles().get(0);
+        assertThat(detalle.costoUnitarioInventariable()).isEqualByComparingTo("118.000000");
+        assertThat(detalle.totalInventariable()).isEqualByComparingTo("1180.000000");
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow().getCostoPromedio()).isEqualByComparingTo("118.000000");
+    }
+
+    @Test
+    void costoPromedioUsaValorSinIgvCuandoIgvEsRecuperable() {
+        TestData data = crearDatosBase();
+        movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                true,
+                "STOCK-INICIAL-IGV-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.000000")
+        ), authentication());
+
+        movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "PROMEDIO-IGV-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("120.00"),
+                new BigDecimal("18.00"),
+                true,
+                null
+        ), authentication());
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("20.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("110.000000");
+    }
+
+    @Test
+    void costoPromedioIncluyeIgvCuandoNoEsRecuperable() {
+        TestData data = crearDatosBase();
+        movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                true,
+                "STOCK-INICIAL-IGV-NO-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.000000")
+        ), authentication());
+
+        movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "PROMEDIO-IGV-NO-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("120.00"),
+                new BigDecimal("18.00"),
+                false,
+                null
+        ), authentication());
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("20.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("120.800000");
+    }
+
+    @Test
+    void variasEntradasConIgvRecuperableNoValorizanElIgv() {
+        TestData data = crearDatosBase();
+        movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "VARIAS-IGV-1",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.00"),
+                new BigDecimal("18.00"),
+                true,
+                null
+        ), authentication());
+        movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "VARIAS-IGV-2",
+                new BigDecimal("5.0000"),
+                new BigDecimal("120.00"),
+                new BigDecimal("18.00"),
+                true,
+                null
+        ), authentication());
+        movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "VARIAS-IGV-3",
+                new BigDecimal("20.0000"),
+                new BigDecimal("90.00"),
+                new BigDecimal("18.00"),
+                true,
+                null
+        ), authentication());
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("35.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("97.142857");
+    }
+
+    @Test
+    void stockInicialUsaCostoDirectoInventariableSinCalcularIgv() {
+        TestData data = crearDatosBase();
+
+        var response = movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                true,
+                "STOCK-INICIAL-DIRECTO",
+                new BigDecimal("100.0000"),
+                new BigDecimal("25.500000")
+        ), authentication());
+
+        var detalle = response.detalles().get(0);
+        assertThat(detalle.valorUnitarioSinIgv()).isNull();
+        assertThat(detalle.tasaIgv()).isNull();
+        assertThat(detalle.igvRecuperable()).isNull();
+        assertThat(detalle.costoUnitarioInventariable()).isEqualByComparingTo("25.500000");
+        assertThat(detalle.totalInventariable()).isEqualByComparingTo("2550.000000");
+        assertThat(detalle.totalConIgv()).isNull();
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("100.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("25.500000");
     }
 
     @Test
@@ -406,6 +654,54 @@ class MovimientoInventarioServiceTest {
         assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("costo unitario");
+    }
+
+    @Test
+    void entradaCompraSinCostoPeroConValorSinIgvEsValidaYCalculaCosto() {
+        TestData data = crearDatosBase();
+
+        var response = movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "DOC-SIN-COSTO-CON-VALOR-IGV",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.00"),
+                new BigDecimal("18.00"),
+                null,
+                null
+        ), authentication());
+
+        assertThat(response.detalles().get(0).igvRecuperable()).isTrue();
+        assertThat(response.detalles().get(0).costoUnitarioInventariable()).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    void entradaConValorSinIgvOTasaNegativaFalla() {
+        TestData data = crearDatosBase();
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "DOC-VALOR-NEGATIVO",
+                new BigDecimal("1.0000"),
+                new BigDecimal("-1.00"),
+                BigDecimal.ZERO,
+                true,
+                null
+        ), authentication())).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("valor unitario");
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "DOC-TASA-NEGATIVA",
+                new BigDecimal("1.0000"),
+                BigDecimal.ONE,
+                new BigDecimal("-18.00"),
+                true,
+                null
+        ), authentication())).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("tasa IGV");
     }
 
     @Test
@@ -810,6 +1106,36 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
+    void consultarMovimientoHistoricoSinCamposIgvNoGeneraNullPointerYCostoSeMantiene() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity movimiento = crearMovimiento(
+                TipoMovimientoInventario.ENTRADA_AJUSTE,
+                null,
+                data.almacenOrigen(),
+                data.usuario()
+        );
+        MovimientoDetalleEntity detalle = crearDetalle(
+                movimiento,
+                data.producto(),
+                new BigDecimal("2.0000"),
+                null,
+                null,
+                new BigDecimal("7.500000")
+        );
+
+        var response = movimientoInventarioService.obtener(movimiento.getId());
+
+        assertThat(response.detalles()).hasSize(1);
+        var detalleResponse = response.detalles().get(0);
+        assertThat(detalleResponse.id()).isEqualTo(detalle.getId());
+        assertThat(detalleResponse.valorUnitarioSinIgv()).isNull();
+        assertThat(detalleResponse.tasaIgv()).isNull();
+        assertThat(detalleResponse.igvRecuperable()).isNull();
+        assertThat(detalleResponse.costoUnitario()).isEqualByComparingTo("7.500000");
+        assertThat(detalleResponse.costoUnitarioInventariable()).isEqualByComparingTo("7.500000");
+    }
+
+    @Test
     void buscarProductosYProveedoresPorTextoFuncionaParaCombos() {
         TestData data = crearDatosBase();
         data.producto().setDescripcion("Descripcion especial autocomplete " + data.producto().getCodigo());
@@ -1135,6 +1461,75 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
+    void anularEntradaConIgvRecuperableRestauraCostoPromedioAnterior() {
+        TestData data = crearDatosBase();
+        movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                true,
+                "ANULAR-IGV-RECUPERABLE-INICIAL",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.000000")
+        ), authentication());
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "ANULAR-IGV-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("120.00"),
+                new BigDecimal("18.00"),
+                true,
+                null
+        ), authentication());
+
+        movimientoInventarioService.anularMovimiento(entrada.id(), "Anular entrada con IGV recuperable");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("100.000000");
+        assertThat(kardexRepository.findByMovimientoId(entrada.id())).hasSize(2);
+    }
+
+    @Test
+    void anularEntradaConIgvNoRecuperableUsaCostoInventariableOriginal() {
+        TestData data = crearDatosBase();
+        movimientoInventarioService.crearMovimiento(crearEntradaAjusteRequest(
+                data,
+                true,
+                "ANULAR-IGV-NO-RECUPERABLE-INICIAL",
+                new BigDecimal("10.0000"),
+                new BigDecimal("100.000000")
+        ), authentication());
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraConIgvRequest(
+                data,
+                true,
+                "ANULAR-IGV-NO-RECUPERABLE",
+                new BigDecimal("10.0000"),
+                new BigDecimal("120.00"),
+                new BigDecimal("18.00"),
+                false,
+                null
+        ), authentication());
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow().getCostoPromedio()).isEqualByComparingTo("120.800000");
+
+        movimientoInventarioService.anularMovimiento(entrada.id(), "Anular entrada con IGV no recuperable");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("100.000000");
+        assertThat(kardexRepository.findByMovimientoId(entrada.id()))
+                .anySatisfy(kardex -> assertThat(kardex.getCostoUnitario()).isEqualByComparingTo("141.600000"));
+    }
+
+    @Test
     void anularPrimeraEntradaDeProductoDejaStockEnCeroSinCostoResidual() {
         TestData data = crearDatosBase();
         MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("8.0000"), new BigDecimal("9.876543"));
@@ -1329,6 +1724,377 @@ class MovimientoInventarioServiceTest {
         ).orElseThrow().getCantidadActual()).isEqualByComparingTo("6.0000");
     }
 
+    @Test
+    void crearDevolucionProveedorBorradorNoAfectaStockNiKardex() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-BORRADOR",
+                new BigDecimal("20.0000"),
+                new BigDecimal("8.000000")
+        ), authentication());
+        var detalleOrigen = entrada.detalles().get(0);
+
+        var devolucion = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigen.id(),
+                data.producto().getId(),
+                new BigDecimal("5.0000"),
+                false
+        ), authentication());
+
+        assertThat(devolucion.estado()).isEqualTo(EstadoMovimientoInventario.BORRADOR);
+        assertThat(devolucion.tipoMovimiento()).isEqualTo(TipoMovimientoInventario.DEVOLUCION_PROVEEDOR);
+        assertThat(devolucion.numero()).startsWith("DEV-");
+        assertThat(devolucion.movimientoOrigenId()).isEqualTo(entrada.id());
+        assertThat(devolucion.proveedorId()).isEqualTo(data.proveedor().getId());
+        assertThat(devolucion.almacenOrigenId()).isEqualTo(data.almacenDestino().getId());
+        assertThat(devolucion.detalles().get(0).movimientoDetalleOrigenId()).isEqualTo(detalleOrigen.id());
+        assertThat(devolucion.detalles().get(0).costoUnitario()).isNull();
+        assertThat(devolucion.detalles().get(0).costoDocumentoUnitario()).isNull();
+        assertThat(kardexRepository.findByMovimientoId(devolucion.id())).isEmpty();
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("20.0000");
+    }
+
+    @Test
+    void crearDevolucionProveedorSinFechaMovimientoFalla() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-SIN-FECHA",
+                new BigDecimal("10.0000"),
+                new BigDecimal("8.000000")
+        ), authentication());
+        var detalleOrigen = entrada.detalles().get(0);
+        var requestBase = crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigen.id(),
+                data.producto().getId(),
+                new BigDecimal("2.0000"),
+                false
+        );
+        var requestSinFecha = new DevolucionProveedorCreateRequest(
+                requestBase.movimientoOrigenId(),
+                requestBase.proveedorId(),
+                null,
+                requestBase.fechaDocumento(),
+                requestBase.numeroNotaCredito(),
+                requestBase.motivo(),
+                requestBase.observacion(),
+                requestBase.confirmar(),
+                requestBase.detalles()
+        );
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearDevolucionProveedor(requestSinFecha, authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("La fecha del movimiento es obligatoria");
+    }
+
+    @Test
+    void confirmarDevolucionProveedorParcialReduceStockGeneraKardexYConservaCostoDocumental() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-VAL",
+                new BigDecimal("20.0000"),
+                new BigDecimal("20.000000")
+        ), authentication());
+        movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-PROM",
+                new BigDecimal("10.0000"),
+                new BigDecimal("10.000000")
+        ), authentication());
+        var detalleOrigen = entrada.detalles().get(0);
+
+        var devolucion = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigen.id(),
+                data.producto().getId(),
+                new BigDecimal("4.0000"),
+                true
+        ), authentication());
+
+        assertThat(devolucion.estado()).isEqualTo(EstadoMovimientoInventario.CONFIRMADO);
+        assertThat(devolucion.confirmadoEn()).isNotNull();
+        var detalle = devolucion.detalles().get(0);
+        assertThat(detalle.costoUnitario()).isEqualByComparingTo("16.666667");
+        assertThat(detalle.totalLinea()).isEqualByComparingTo("66.666668");
+        assertThat(detalle.costoDocumentoUnitario()).isEqualByComparingTo("20.000000");
+        assertThat(detalle.valorStock()).isEqualByComparingTo("66.666668");
+        assertThat(detalle.valorDocumento()).isEqualByComparingTo("80.000000");
+        assertThat(detalle.diferenciaValorizacion()).isEqualByComparingTo("13.333332");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("26.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("16.666667");
+        assertThat(kardexRepository.findByMovimientoId(devolucion.id()))
+                .hasSize(1)
+                .allSatisfy(kardex -> {
+                    assertThat(kardex.getTipoMovimiento()).isEqualTo(TipoMovimientoInventario.DEVOLUCION_PROVEEDOR);
+                    assertThat(kardex.getEntrada()).isEqualByComparingTo("0.0000");
+                    assertThat(kardex.getSalida()).isEqualByComparingTo("4.0000");
+                    assertThat(kardex.getCostoUnitario()).isEqualByComparingTo("16.666667");
+                });
+        assertThat(movimientoInventarioRepository.findById(entrada.id()).orElseThrow().getEstado())
+                .isEqualTo(EstadoMovimientoInventario.CONFIRMADO);
+    }
+
+    @Test
+    void confirmarDevolucionProveedorTotalDejaStockEnCeroYCostoPromedioNull() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-TOTAL",
+                new BigDecimal("5.0000"),
+                new BigDecimal("11.000000")
+        ), authentication());
+        var detalleOrigen = entrada.detalles().get(0);
+
+        movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigen.id(),
+                data.producto().getId(),
+                new BigDecimal("5.0000"),
+                true
+        ), authentication());
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("0.0000");
+        assertThat(stock.getCostoPromedio()).isNull();
+    }
+
+    @Test
+    void crearDevolucionProveedorRechazaProductoQueNoPerteneceAlDetalleOrigen() {
+        TestData data = crearDatosBase();
+        ProductoEntity otroProducto = crearProducto(
+                data.producto().getUnidadMedida(),
+                data.producto().getFamilia(),
+                data.producto().getTipoArticulo()
+        );
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-PROD-AJENO",
+                new BigDecimal("5.0000"),
+                new BigDecimal("9.000000")
+        ), authentication());
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                entrada.detalles().get(0).id(),
+                otroProducto.getId(),
+                new BigDecimal("1.0000"),
+                false
+        ), authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("producto");
+    }
+
+    @Test
+    void cantidadesDevolucionSoloConsideranConfirmadas() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-PEND",
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        Long detalleOrigenId = entrada.detalles().get(0).id();
+
+        var borrador = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigenId,
+                data.producto().getId(),
+                new BigDecimal("7.0000"),
+                false
+        ), authentication());
+        assertThat(movimientoInventarioService.obtenerCantidadesDevolucion(entrada.id()).get(0).cantidadPendienteDevolver())
+                .isEqualByComparingTo("10.0000");
+
+        movimientoInventarioService.cancelarMovimiento(
+                borrador.id(),
+                new MovimientoCancelacionRequest("No se enviara al proveedor"),
+                authentication()
+        );
+        assertThat(movimientoInventarioService.obtenerCantidadesDevolucion(entrada.id()).get(0).cantidadPendienteDevolver())
+                .isEqualByComparingTo("10.0000");
+
+        var confirmada = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigenId,
+                data.producto().getId(),
+                new BigDecimal("4.0000"),
+                true
+        ), authentication());
+        assertThat(movimientoInventarioService.obtenerCantidadesDevolucion(entrada.id()).get(0).cantidadPendienteDevolver())
+                .isEqualByComparingTo("6.0000");
+
+        movimientoInventarioService.anularMovimiento(confirmada.id(), "Devolucion anulada");
+        assertThat(movimientoInventarioService.obtenerCantidadesDevolucion(entrada.id()).get(0).cantidadPendienteDevolver())
+                .isEqualByComparingTo("10.0000");
+    }
+
+    @Test
+    void confirmarDevolucionProveedorRechazaCantidadMayorAPendiente() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-EXCESO",
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        Long detalleOrigenId = entrada.detalles().get(0).id();
+        movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigenId,
+                data.producto().getId(),
+                new BigDecimal("4.0000"),
+                true
+        ), authentication());
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                detalleOrigenId,
+                data.producto().getId(),
+                new BigDecimal("7.0000"),
+                true
+        ), authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("pendiente");
+    }
+
+    @Test
+    void confirmarDevolucionProveedorRechazaCantidadMayorAlStockFisico() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-STOCK",
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        MovimientoInventarioEntity salidaPosterior = crearMovimiento(
+                TipoMovimientoInventario.SALIDA_CONSUMO,
+                data.almacenDestino(),
+                null,
+                data.usuario()
+        );
+        crearDetalle(salidaPosterior, data.producto(), new BigDecimal("6.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(salidaPosterior.getId());
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                entrada.detalles().get(0).id(),
+                data.producto().getId(),
+                new BigDecimal("5.0000"),
+                true
+        ), authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Stock insuficiente");
+    }
+
+    @Test
+    void anularDevolucionProveedorSinPosterioresRestauraStockYCosto() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-ANULAR",
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        var devolucion = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                entrada.detalles().get(0).id(),
+                data.producto().getId(),
+                new BigDecimal("4.0000"),
+                true
+        ), authentication());
+
+        movimientoInventarioService.anularMovimiento(devolucion.id(), "Error en devolucion");
+
+        MovimientoInventarioEntity anulada = movimientoInventarioRepository.findById(devolucion.id()).orElseThrow();
+        assertThat(anulada.getEstado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenDestino().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("5.000000");
+        assertThat(kardexRepository.findByMovimientoId(devolucion.id())).hasSize(2);
+    }
+
+    @Test
+    void anularDevolucionProveedorConPosteriorFalla() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-POSTERIOR",
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        var devolucion = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                entrada.detalles().get(0).id(),
+                data.producto().getId(),
+                new BigDecimal("2.0000"),
+                true
+        ), authentication());
+        MovimientoInventarioEntity salidaPosterior = crearMovimiento(
+                TipoMovimientoInventario.SALIDA_CONSUMO,
+                data.almacenDestino(),
+                null,
+                data.usuario()
+        );
+        crearDetalle(salidaPosterior, data.producto(), new BigDecimal("1.0000"), null, null, null);
+        movimientoInventarioService.confirmarMovimiento(salidaPosterior.getId());
+
+        assertThatThrownBy(() -> movimientoInventarioService.anularMovimiento(devolucion.id(), "No procede"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("movimientos posteriores");
+    }
+
+    @Test
+    void listarDevolucionesPorEntradaDevuelveHistorialRelacionado() {
+        TestData data = crearDatosBase();
+        var entrada = movimientoInventarioService.crearMovimiento(crearEntradaCompraRequest(
+                data,
+                true,
+                "ENT-DEV-HIST",
+                new BigDecimal("10.0000"),
+                new BigDecimal("5.000000")
+        ), authentication());
+        var devolucion = movimientoInventarioService.crearDevolucionProveedor(crearDevolucionProveedorRequest(
+                entrada.id(),
+                entrada.detalles().get(0).id(),
+                data.producto().getId(),
+                new BigDecimal("1.0000"),
+                false
+        ), authentication());
+
+        assertThat(movimientoInventarioService.listarDevolucionesPorEntrada(entrada.id()))
+                .extracting("id")
+                .contains(devolucion.id());
+    }
+
     private MovimientoInventarioCreateRequest crearEntradaCompraRequest(
             TestData data,
             Boolean confirmar,
@@ -1448,6 +2214,65 @@ class MovimientoInventarioServiceTest {
                         cantidad,
                         costoUnitario,
                         "Detalle entrada compra"
+                ))
+        );
+    }
+
+    private MovimientoInventarioCreateRequest crearEntradaCompraConIgvRequest(
+            TestData data,
+            Boolean confirmar,
+            String documentoReferencia,
+            BigDecimal cantidad,
+            BigDecimal valorUnitarioSinIgv,
+            BigDecimal tasaIgv,
+            Boolean igvRecuperable,
+            BigDecimal costoUnitarioDirecto
+    ) {
+        return new MovimientoInventarioCreateRequest(
+                TipoMovimientoInventario.ENTRADA_COMPRA,
+                LocalDateTime.now(),
+                data.proveedor().getId(),
+                null,
+                null,
+                data.almacenDestino().getId(),
+                null,
+                documentoReferencia,
+                "Entrada compra con IGV",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                confirmar,
+                "T001",
+                "000123",
+                LocalDate.now(),
+                "FACTURA",
+                "F001",
+                "000456",
+                LocalDate.now(),
+                "OC-IGV",
+                null,
+                null,
+                null,
+                null,
+                LocalDate.now().minusDays(1),
+                LocalDate.now(),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                "Documentos de prueba IGV",
+                List.of(new MovimientoDetalleCreateRequest(
+                        data.producto().getId(),
+                        null,
+                        null,
+                        cantidad,
+                        costoUnitarioDirecto,
+                        valorUnitarioSinIgv,
+                        tasaIgv,
+                        igvRecuperable,
+                        "Detalle entrada compra IGV"
                 ))
         );
     }
@@ -1667,12 +2492,41 @@ class MovimientoInventarioServiceTest {
         );
     }
 
+    private DevolucionProveedorCreateRequest crearDevolucionProveedorRequest(
+            Long entradaOrigenId,
+            Long detalleOrigenId,
+            Long productoId,
+            BigDecimal cantidad,
+            Boolean confirmar
+    ) {
+        return new DevolucionProveedorCreateRequest(
+                entradaOrigenId,
+                null,
+                LocalDateTime.now(),
+                LocalDate.now(),
+                "NC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+                "Devolucion por control de calidad",
+                "Devolucion proveedor de prueba",
+                confirmar,
+                List.of(new DevolucionProveedorDetalleCreateRequest(
+                        detalleOrigenId,
+                        productoId,
+                        cantidad,
+                        "Detalle devolucion"
+                ))
+        );
+    }
+
     private UsernamePasswordAuthenticationToken authentication() {
         return new UsernamePasswordAuthenticationToken(
                 "admin",
                 null,
                 List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
         );
+    }
+
+    private long correlativoMovimiento(String numero) {
+        return Long.parseLong(numero.substring(numero.indexOf('-') + 1));
     }
 
     private MovimientoInventarioEntity confirmarEntrada(TestData data, BigDecimal cantidad) {

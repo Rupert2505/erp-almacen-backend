@@ -8,5 +8,6 @@ public enum TipoMovimientoInventario {
     SALIDA_AJUSTE,
     TRANSFERENCIA,
     AJUSTE_POSITIVO,
-    AJUSTE_NEGATIVO
+    AJUSTE_NEGATIVO,
+    DEVOLUCION_PROVEEDOR
 }

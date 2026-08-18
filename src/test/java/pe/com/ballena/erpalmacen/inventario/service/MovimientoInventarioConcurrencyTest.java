@@ -8,6 +8,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.kardex.repository.KardexRepository;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorCreateRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalleEntity;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoInventarioEntity;
@@ -20,6 +22,8 @@ import pe.com.ballena.erpalmacen.maestros.familias.entity.FamiliaEntity;
 import pe.com.ballena.erpalmacen.maestros.familias.repository.FamiliaRepository;
 import pe.com.ballena.erpalmacen.maestros.productos.entity.ProductoEntity;
 import pe.com.ballena.erpalmacen.maestros.productos.repository.ProductoRepository;
+import pe.com.ballena.erpalmacen.maestros.proveedores.entity.ProveedorEntity;
+import pe.com.ballena.erpalmacen.maestros.proveedores.repository.ProveedorRepository;
 import pe.com.ballena.erpalmacen.maestros.tiposarticulo.entity.TipoArticuloEntity;
 import pe.com.ballena.erpalmacen.maestros.tiposarticulo.repository.TipoArticuloRepository;
 import pe.com.ballena.erpalmacen.maestros.unidadesmedida.entity.UnidadMedidaEntity;
@@ -29,6 +33,7 @@ import pe.com.ballena.erpalmacen.usuarios.entity.UsuarioEntity;
 import pe.com.ballena.erpalmacen.usuarios.repository.UsuarioRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,6 +67,9 @@ class MovimientoInventarioConcurrencyTest {
 
     @Autowired
     private ProductoRepository productoRepository;
+
+    @Autowired
+    private ProveedorRepository proveedorRepository;
 
     @Autowired
     private UnidadMedidaRepository unidadMedidaRepository;
@@ -279,6 +287,56 @@ class MovimientoInventarioConcurrencyTest {
         assertThat(stock.getCostoPromedio()).isEqualByComparingTo("2.333333");
     }
 
+    @Test
+    void devolucionesConcurrentesContraMismaEntradaNoSuperanCantidadOriginal() throws Exception {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = crearMovimientoEntradaCompra(
+                data,
+                new BigDecimal("10.0000"),
+                new BigDecimal("6.000000")
+        );
+        MovimientoDetalleEntity detalleOrigen = movimientoDetalleRepository.findByMovimientoIdOrderByIdAsc(entrada.getId()).get(0);
+        movimientoInventarioService.confirmarMovimiento(entrada.getId());
+
+        List<ResultadoConcurrente> resultados = ejecutarConcurrentemente(
+                () -> {
+                    movimientoInventarioService.crearDevolucionProveedor(
+                            devolucionRequest(entrada, detalleOrigen, new BigDecimal("7.0000")),
+                            authentication()
+                    );
+                    return ResultadoConcurrente.exito();
+                },
+                () -> {
+                    movimientoInventarioService.crearDevolucionProveedor(
+                            devolucionRequest(entrada, detalleOrigen, new BigDecimal("7.0000")),
+                            authentication()
+                    );
+                    return ResultadoConcurrente.exito();
+                }
+        );
+
+        assertThat(resultados).filteredOn(ResultadoConcurrente::exitoso).hasSize(1);
+        assertThat(resultados)
+                .filteredOn(resultado -> !resultado.exitoso())
+                .allSatisfy(resultado -> assertThat(resultado.error())
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("pendiente"));
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("3.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("6.000000");
+        List<MovimientoInventarioEntity> devoluciones = movimientoInventarioRepository
+                .findByMovimientoOrigenIdOrderByFechaMovimientoDescIdDesc(entrada.getId());
+        assertThat(devoluciones)
+                .filteredOn(movimiento -> movimiento.getTipoMovimiento() == TipoMovimientoInventario.DEVOLUCION_PROVEEDOR)
+                .hasSize(1)
+                .allSatisfy(movimiento -> assertThat(movimiento.getEstado()).isEqualTo(EstadoMovimientoInventario.CONFIRMADO));
+        assertThat(kardexRepository.findByMovimientoId(devoluciones.get(0).getId())).hasSize(1);
+    }
+
     @SafeVarargs
     private List<ResultadoConcurrente> ejecutarConcurrentemente(Callable<ResultadoConcurrente>... tareas)
             throws Exception {
@@ -327,6 +385,24 @@ class MovimientoInventarioConcurrencyTest {
         return movimiento;
     }
 
+    private MovimientoInventarioEntity crearMovimientoEntradaCompra(
+            TestData data,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario
+    ) {
+        MovimientoInventarioEntity movimiento = crearMovimiento(
+                TipoMovimientoInventario.ENTRADA_COMPRA,
+                null,
+                data.almacenOrigen(),
+                data.usuario()
+        );
+        movimiento.setProveedor(data.proveedor());
+        movimiento.setFechaRecepcion(LocalDate.now());
+        movimiento = movimientoInventarioRepository.save(movimiento);
+        crearDetalle(movimiento, data.producto(), cantidad, costoUnitario);
+        return movimiento;
+    }
+
     private MovimientoInventarioEntity crearMovimientoSalida(TestData data, BigDecimal cantidad) {
         MovimientoInventarioEntity movimiento = crearMovimiento(
                 TipoMovimientoInventario.SALIDA_CONSUMO,
@@ -371,6 +447,29 @@ class MovimientoInventarioConcurrencyTest {
         return movimientoDetalleRepository.save(detalle);
     }
 
+    private DevolucionProveedorCreateRequest devolucionRequest(
+            MovimientoInventarioEntity entrada,
+            MovimientoDetalleEntity detalleOrigen,
+            BigDecimal cantidad
+    ) {
+        return new DevolucionProveedorCreateRequest(
+                entrada.getId(),
+                null,
+                LocalDateTime.now(),
+                LocalDate.now(),
+                "NC-" + suffix(),
+                "Devolucion concurrente",
+                "Devolucion proveedor concurrente",
+                true,
+                List.of(new DevolucionProveedorDetalleCreateRequest(
+                        detalleOrigen.getId(),
+                        detalleOrigen.getProducto().getId(),
+                        cantidad,
+                        "Detalle devolucion concurrente"
+                ))
+        );
+    }
+
     private TestData crearDatosBase() {
         UsuarioEntity usuario = usuarioRepository.findByUsername("admin").orElseThrow();
         UnidadMedidaEntity unidad = crearUnidadMedida();
@@ -378,7 +477,8 @@ class MovimientoInventarioConcurrencyTest {
         TipoArticuloEntity tipoArticulo = tipoArticuloRepository.findByCodigoIgnoreCase("ALMACEN").orElseThrow();
         ProductoEntity producto = crearProducto(unidad, familia, tipoArticulo);
         AlmacenEntity almacenOrigen = crearAlmacen();
-        return new TestData(usuario, producto, almacenOrigen);
+        ProveedorEntity proveedor = crearProveedor();
+        return new TestData(usuario, producto, almacenOrigen, proveedor);
     }
 
     private UnidadMedidaEntity crearUnidadMedida() {
@@ -426,6 +526,16 @@ class MovimientoInventarioConcurrencyTest {
         return almacenRepository.save(almacen);
     }
 
+    private ProveedorEntity crearProveedor() {
+        String suffix = suffix();
+        ProveedorEntity proveedor = new ProveedorEntity();
+        proveedor.setTipoDocumento("RUC");
+        proveedor.setNumeroDocumento("40" + suffix.substring(0, 8));
+        proveedor.setRazonSocial("Proveedor Concurrencia " + suffix);
+        proveedor.setActivo(true);
+        return proveedorRepository.save(proveedor);
+    }
+
     private UsernamePasswordAuthenticationToken authentication() {
         return new UsernamePasswordAuthenticationToken(
                 "admin",
@@ -441,7 +551,8 @@ class MovimientoInventarioConcurrencyTest {
     private record TestData(
             UsuarioEntity usuario,
             ProductoEntity producto,
-            AlmacenEntity almacenOrigen
+            AlmacenEntity almacenOrigen,
+            ProveedorEntity proveedor
     ) {
     }
 

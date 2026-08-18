@@ -1,20 +1,36 @@
 package pe.com.ballena.erpalmacen.reportes.inventario.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 public record EntradaProveedorResponse(
-        Long proveedorId,
-        String proveedorDocumento,
-        String proveedorRazonSocial,
+        LocalDateTime fechaMovimiento,
+        LocalDate fechaPedido,
+        LocalDate fechaRecepcion,
         Long movimientoId,
         String numeroMovimiento,
-        LocalDateTime fechaMovimiento,
-        String documentoReferencia,
-        String productoCodigo,
-        String productoNombre,
+        Long proveedorId,
+        String proveedorNumeroDocumento,
+        String proveedorRazonSocial,
+        String ordenCompra,
+        String guiaSerie,
+        String guiaNumero,
+        LocalDate guiaFecha,
+        String comprobanteTipo,
+        String comprobanteSerie,
+        String comprobanteNumero,
+        LocalDate comprobanteFecha,
+        String almacenDestino,
+        Long productoId,
+        String codigoProducto,
+        String nombreProducto,
+        String unidadMedida,
         BigDecimal cantidad,
         BigDecimal costoUnitario,
-        BigDecimal totalLinea
+        BigDecimal valorLinea,
+        BigDecimal flete,
+        BigDecimal movilidad,
+        BigDecimal otrosGastos
 ) {
 }

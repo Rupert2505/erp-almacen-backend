@@ -6,15 +6,23 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 public record SalidaInventarioResponse(
+        LocalDateTime fecha,
         Long movimientoId,
         String numeroMovimiento,
         TipoMovimientoInventario tipoMovimiento,
-        LocalDateTime fechaMovimiento,
-        String almacenNombre,
-        String productoCodigo,
-        String productoNombre,
+        pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario estado,
+        String almacenOrigen,
+        String ubicacionOrigen,
+        Long productoId,
+        String codigoProducto,
+        String nombreProducto,
+        String familia,
+        String unidadMedida,
         BigDecimal cantidad,
-        BigDecimal costoReferencial,
+        BigDecimal costoPromedioAplicado,
+        BigDecimal valorSalida,
+        String usuario,
+        String motivo,
         String observacion
 ) {
 }

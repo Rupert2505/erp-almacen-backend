@@ -20,6 +20,34 @@ public record MovimientoDetalleCreateRequest(
         @DecimalMin(value = "0.0000", message = "El costo unitario no puede ser negativo")
         BigDecimal costoUnitario,
 
+        @DecimalMin(value = "0.0000", message = "El valor unitario sin IGV no puede ser negativo")
+        BigDecimal valorUnitarioSinIgv,
+
+        @DecimalMin(value = "0.0000", message = "La tasa IGV no puede ser negativa")
+        BigDecimal tasaIgv,
+
+        Boolean igvRecuperable,
+
         String observacion
 ) {
+    public MovimientoDetalleCreateRequest(
+            Long productoId,
+            Long ubicacionOrigenId,
+            Long ubicacionDestinoId,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario,
+            String observacion
+    ) {
+        this(
+                productoId,
+                ubicacionOrigenId,
+                ubicacionDestinoId,
+                cantidad,
+                costoUnitario,
+                null,
+                null,
+                null,
+                observacion
+        );
+    }
 }

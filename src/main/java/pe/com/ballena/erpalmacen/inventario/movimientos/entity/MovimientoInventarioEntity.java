@@ -57,6 +57,10 @@ public class MovimientoInventarioEntity {
     @JoinColumn(name = "almacen_destino_id")
     private AlmacenEntity almacenDestino;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "movimiento_origen_id")
+    private MovimientoInventarioEntity movimientoOrigen;
+
     @Column(name = "documento_referencia", length = 100)
     private String documentoReferencia;
 
@@ -134,6 +138,12 @@ public class MovimientoInventarioEntity {
 
     @Column(name = "observacion_documentaria", columnDefinition = "TEXT")
     private String observacionDocumentaria;
+
+    @Column(name = "fecha_documento")
+    private LocalDate fechaDocumento;
+
+    @Column(name = "numero_nota_credito", length = 50)
+    private String numeroNotaCredito;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "usuario_id", nullable = false)
@@ -235,6 +245,14 @@ public class MovimientoInventarioEntity {
 
     public void setAlmacenDestino(AlmacenEntity almacenDestino) {
         this.almacenDestino = almacenDestino;
+    }
+
+    public MovimientoInventarioEntity getMovimientoOrigen() {
+        return movimientoOrigen;
+    }
+
+    public void setMovimientoOrigen(MovimientoInventarioEntity movimientoOrigen) {
+        this.movimientoOrigen = movimientoOrigen;
     }
 
     public String getDocumentoReferencia() {
@@ -443,6 +461,22 @@ public class MovimientoInventarioEntity {
 
     public void setObservacionDocumentaria(String observacionDocumentaria) {
         this.observacionDocumentaria = observacionDocumentaria;
+    }
+
+    public LocalDate getFechaDocumento() {
+        return fechaDocumento;
+    }
+
+    public void setFechaDocumento(LocalDate fechaDocumento) {
+        this.fechaDocumento = fechaDocumento;
+    }
+
+    public String getNumeroNotaCredito() {
+        return numeroNotaCredito;
+    }
+
+    public void setNumeroNotaCredito(String numeroNotaCredito) {
+        this.numeroNotaCredito = numeroNotaCredito;
     }
 
     public UsuarioEntity getUsuario() {

@@ -15,16 +15,19 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioResponse;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleDevolucionPendienteResponse;
 import pe.com.ballena.erpalmacen.inventario.service.MovimientoInventarioService;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 import pe.com.ballena.erpalmacen.shared.response.ApiResponse;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/inventario/movimientos")
@@ -54,14 +57,26 @@ public class MovimientoInventarioController {
         ));
     }
 
+    @PostMapping("/devoluciones-proveedor")
+    @PreAuthorize("hasAuthority('INVENTARIO_DEVOLUCION_CREAR') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> crearDevolucionProveedor(
+            @Valid @RequestBody DevolucionProveedorCreateRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                "Devolucion a proveedor creada correctamente",
+                movimientoInventarioService.crearDevolucionProveedor(request, authentication)
+        ));
+    }
+
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('STOCK_VER') or hasAuthority('KARDEX_VER') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('STOCK_VER') or hasAuthority('KARDEX_VER') or hasAuthority('INVENTARIO_DEVOLUCION_VER') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> obtener(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(movimientoInventarioService.obtener(id)));
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('STOCK_VER') or hasAuthority('KARDEX_VER') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('STOCK_VER') or hasAuthority('KARDEX_VER') or hasAuthority('INVENTARIO_DEVOLUCION_VER') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Page<MovimientoInventarioResponse>>> listar(
             @RequestParam(required = false) TipoMovimientoInventario tipoMovimiento,
             @RequestParam(required = false) EstadoMovimientoInventario estado,
@@ -75,12 +90,33 @@ public class MovimientoInventarioController {
         ));
     }
 
+    @GetMapping("/{entradaId}/devoluciones")
+    @PreAuthorize("hasAuthority('INVENTARIO_DEVOLUCION_VER') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<MovimientoInventarioResponse>>> listarDevolucionesPorEntrada(
+            @PathVariable Long entradaId
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                movimientoInventarioService.listarDevolucionesPorEntrada(entradaId)
+        ));
+    }
+
+    @GetMapping("/{entradaId}/cantidades-devolucion")
+    @PreAuthorize("hasAuthority('INVENTARIO_DEVOLUCION_VER') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<MovimientoDetalleDevolucionPendienteResponse>>> obtenerCantidadesDevolucion(
+            @PathVariable Long entradaId
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                movimientoInventarioService.obtenerCantidadesDevolucion(entradaId)
+        ));
+    }
+
     @PostMapping("/{id}/confirmar")
     @PreAuthorize("""
             hasAuthority('INVENTARIO_ENTRADA')
             or hasAuthority('INVENTARIO_SALIDA')
             or hasAuthority('INVENTARIO_TRANSFERENCIA')
             or hasAuthority('INVENTARIO_AJUSTE')
+            or hasAuthority('INVENTARIO_DEVOLUCION_CONFIRMAR')
             or hasRole('ADMIN')
             """)
     public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> confirmar(
@@ -99,6 +135,8 @@ public class MovimientoInventarioController {
             or hasAuthority('INVENTARIO_SALIDA')
             or hasAuthority('INVENTARIO_TRANSFERENCIA')
             or hasAuthority('INVENTARIO_AJUSTE')
+            or hasAuthority('INVENTARIO_DEVOLUCION_CREAR')
+            or hasAuthority('INVENTARIO_DEVOLUCION_CONFIRMAR')
             or hasRole('ADMIN')
             """)
     public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> cancelar(
@@ -113,7 +151,7 @@ public class MovimientoInventarioController {
     }
 
     @PostMapping("/{id}/anular")
-    @PreAuthorize("hasAuthority('INVENTARIO_AJUSTE') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('INVENTARIO_AJUSTE') or hasAuthority('INVENTARIO_DEVOLUCION_ANULAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<MovimientoInventarioResponse>> anular(
             @PathVariable Long id,
             @Valid @RequestBody MovimientoAnulacionRequest request,

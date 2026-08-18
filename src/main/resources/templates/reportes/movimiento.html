@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <style>
+        @page {
+            size: A4;
+            margin: 18mm 12mm 20mm 12mm;
+            @bottom-right {
+                content: "Pagina " counter(page) " de " counter(pages);
+                font-size: 9px;
+                color: #555;
+            }
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            color: #222;
+        }
+        .header {
+            display: table;
+            width: 100%;
+            border-bottom: 2px solid #1f2937;
+            padding-bottom: 10px;
+            margin-bottom: 14px;
+        }
+        .header > div {
+            display: table-cell;
+            vertical-align: top;
+        }
+        .company {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .doc-title {
+            text-align: right;
+            font-size: 17px;
+            font-weight: bold;
+        }
+        .muted {
+            color: #666;
+        }
+        .section-title {
+            font-weight: bold;
+            margin: 12px 0 6px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 3px;
+        }
+        .grid {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .grid td {
+            padding: 4px 6px;
+            vertical-align: top;
+        }
+        .label {
+            font-weight: bold;
+            width: 18%;
+            color: #374151;
+        }
+        table.detail {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+        table.detail th,
+        table.detail td {
+            border: 1px solid #d1d5db;
+            padding: 5px;
+        }
+        table.detail th {
+            background: #f3f4f6;
+            text-align: left;
+        }
+        .number {
+            text-align: right;
+        }
+        .signatures {
+            display: table;
+            width: 100%;
+            margin-top: 42px;
+        }
+        .signature {
+            display: table-cell;
+            width: 33%;
+            text-align: center;
+            border-top: 1px solid #333;
+            padding-top: 6px;
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 20px;
+            color: #666;
+            font-size: 9px;
+        }
+        .page-info {
+            float: right;
+        }
+    </style>
+</head>
+<body>
+<div th:replace="~{reportes/layout/header :: header}"></div>
+
+<table class="grid">
+    <tr>
+        <td class="label">Numero</td>
+        <td th:text="${movimiento.numero}">MOV-0001</td>
+        <td class="label">Fecha</td>
+        <td th:text="${#temporals.format(movimiento.fechaMovimiento, 'yyyy-MM-dd HH:mm')}">2026-01-01</td>
+    </tr>
+    <tr>
+        <td class="label">Estado</td>
+        <td th:text="${movimiento.estado}">CONFIRMADO</td>
+        <td class="label">Usuario</td>
+        <td th:text="${movimiento.usuario.username}">admin</td>
+    </tr>
+</table>
+
+<div class="section-title">Datos del movimiento</div>
+<table class="grid">
+    <tr th:if="${proveedor != null}">
+        <td class="label">Proveedor</td>
+        <td colspan="3" th:text="${proveedor.razonSocial}">Proveedor</td>
+    </tr>
+    <tr th:if="${movimiento.ordenCompraNumero != null || movimiento.ordenCompra != null}">
+        <td class="label">Orden compra</td>
+        <td colspan="3" th:text="${movimiento.ordenCompraNumero != null ? movimiento.ordenCompraNumero : movimiento.ordenCompra}">OC</td>
+    </tr>
+    <tr th:if="${movimiento.guiaSerie != null || movimiento.guiaNumero != null}">
+        <td class="label">Guia</td>
+        <td th:text="${(movimiento.guiaSerie ?: '') + '-' + (movimiento.guiaNumero ?: '')}">G001-1</td>
+        <td class="label">Fecha guia</td>
+        <td th:text="${movimiento.guiaFecha}">2026-01-01</td>
+    </tr>
+    <tr th:if="${movimiento.comprobanteSerie != null || movimiento.comprobanteNumero != null}">
+        <td class="label">Comprobante</td>
+        <td th:text="${(movimiento.comprobanteTipo ?: '') + ' ' + (movimiento.comprobanteSerie ?: '') + '-' + (movimiento.comprobanteNumero ?: '')}">FACTURA</td>
+        <td class="label">Fecha comprobante</td>
+        <td th:text="${movimiento.comprobanteFechaEmision}">2026-01-01</td>
+    </tr>
+    <tr th:if="${almacenOrigen != null}">
+        <td class="label">Almacen origen</td>
+        <td colspan="3" th:text="${almacenOrigen.nombre}">Origen</td>
+    </tr>
+    <tr th:if="${almacenDestino != null}">
+        <td class="label">Almacen destino</td>
+        <td colspan="3" th:text="${almacenDestino.nombre}">Destino</td>
+    </tr>
+    <tr th:if="${movimiento.motivoMovimiento != null}">
+        <td class="label">Motivo</td>
+        <td colspan="3" th:text="${movimiento.motivoMovimiento}">Motivo</td>
+    </tr>
+    <tr th:if="${movimiento.observacion != null}">
+        <td class="label">Observacion</td>
+        <td colspan="3" th:text="${movimiento.observacion}">Observacion</td>
+    </tr>
+</table>
+
+<div class="section-title">Detalle</div>
+<table class="detail">
+    <thead>
+    <tr>
+        <th>Codigo</th>
+        <th>Producto</th>
+        <th>Unidad</th>
+        <th class="number">Cantidad</th>
+        <th class="number" th:if="${mostrarCostos}">Costo unitario</th>
+        <th class="number" th:if="${mostrarCostos}">Valor total</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="detalle : ${detalles}">
+        <td th:text="${detalle.producto.codigo}">P001</td>
+        <td th:text="${detalle.producto.nombre}">Producto</td>
+        <td th:text="${detalle.producto.unidadMedida.abreviatura}">UND</td>
+        <td class="number" th:text="${detalle.cantidad}">0</td>
+        <td class="number" th:if="${mostrarCostos}" th:text="${detalle.costoUnitario}">0</td>
+        <td class="number" th:if="${mostrarCostos}" th:text="${detalle.totalLinea}">0</td>
+    </tr>
+    </tbody>
+</table>
+
+<div th:replace="~{reportes/layout/footer :: footer}"></div>
+</body>
+</html>

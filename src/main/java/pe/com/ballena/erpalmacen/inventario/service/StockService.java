@@ -101,6 +101,42 @@ public class StockService {
         );
     }
 
+    public StockResultado registrarSalidaDevolucionProveedor(
+            ProductoEntity producto,
+            AlmacenEntity almacen,
+            UbicacionAlmacenEntity ubicacion,
+            BigDecimal cantidad,
+            LocalDateTime fechaMovimiento
+    ) {
+        StockActualEntity stock = buscarConBloqueo(producto.getId(), almacen.getId(), ubicacion)
+                .orElseThrow(() -> new BusinessException("No existe stock para el producto en el almacen indicado"));
+
+        BigDecimal saldoAnterior = stock.getCantidadActual();
+        if (saldoAnterior.compareTo(cantidad) < 0) {
+            throw new BusinessException("Stock insuficiente para confirmar la devolucion al proveedor");
+        }
+        if (stock.getCostoPromedio() == null) {
+            throw new BusinessException("No existe costo promedio actual para valorizar la devolucion al proveedor");
+        }
+
+        BigDecimal costoPromedioAnterior = stock.getCostoPromedio();
+        BigDecimal saldoFinal = saldoAnterior.subtract(cantidad);
+        stock.setCantidadActual(saldoFinal);
+        if (saldoFinal.compareTo(BigDecimal.ZERO) == 0) {
+            stock.setCostoPromedio(null);
+        }
+        stock.setFechaUltimoMovimiento(fechaMovimiento);
+
+        StockActualEntity guardado = stockActualRepository.save(stock);
+        return new StockResultado(
+                guardado,
+                saldoAnterior,
+                saldoFinal,
+                costoPromedioAnterior,
+                guardado.getCostoPromedio()
+        );
+    }
+
     public StockActualEntity bloquearStock(
             ProductoEntity producto,
             AlmacenEntity almacen,
@@ -139,6 +175,28 @@ public class StockService {
                 saldoAnterior,
                 saldoFinal,
                 costoReferencia,
+                guardado.getCostoPromedio()
+        );
+    }
+
+    public StockResultado revertirSalida(
+            StockActualEntity stock,
+            BigDecimal cantidad,
+            BigDecimal costoPromedioAnterior,
+            LocalDateTime fechaMovimiento
+    ) {
+        BigDecimal saldoAnterior = stock.getCantidadActual();
+        BigDecimal saldoFinal = saldoAnterior.add(cantidad);
+        stock.setCantidadActual(saldoFinal);
+        stock.setCostoPromedio(saldoFinal.compareTo(BigDecimal.ZERO) == 0 ? null : costoPromedioAnterior);
+        stock.setFechaUltimoMovimiento(fechaMovimiento);
+
+        StockActualEntity guardado = stockActualRepository.save(stock);
+        return new StockResultado(
+                guardado,
+                saldoAnterior,
+                saldoFinal,
+                costoPromedioAnterior,
                 guardado.getCostoPromedio()
         );
     }
