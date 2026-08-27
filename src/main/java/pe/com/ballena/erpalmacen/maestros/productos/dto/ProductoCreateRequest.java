@@ -37,7 +37,7 @@ public record ProductoCreateRequest(
         @DecimalMin(value = "0.0000", message = "El stock maximo no puede ser negativo")
         BigDecimal stockMaximo,
 
-        @DecimalMin(value = "0.0000", message = "El costo referencial no puede ser negativo")
+        @DecimalMin(value = "0.0000", message = "El costo base comercial sin IGV no puede ser negativo")
         BigDecimal costoReferencial,
 
         Boolean controlaLote,

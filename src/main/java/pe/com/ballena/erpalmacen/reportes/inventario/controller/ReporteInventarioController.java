@@ -1,7 +1,6 @@
 package pe.com.ballena.erpalmacen.reportes.inventario.controller;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -28,6 +27,7 @@ import pe.com.ballena.erpalmacen.reportes.inventario.dto.ProductoBajoMinimoRepor
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.ResumenInventarioResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaInventarioReporteResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaInventarioResponse;
+import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaValorizadaOsReporteResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.StockValorizadoReporteResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.StockValorizadoResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.excel.ExcelReportService;
@@ -46,7 +46,7 @@ import java.util.stream.Collectors;
 @PreAuthorize("hasAuthority('REPORTE_VER') or hasRole('ADMIN')")
 public class ReporteInventarioController {
 
-    private static final Pageable EXPORT_PAGEABLE = PageRequest.of(0, 10000);
+    private static final Pageable EXPORT_PAGEABLE = Pageable.unpaged();
     private static final MediaType EXCEL_MEDIA_TYPE = MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     private final ReporteInventarioService reporteInventarioService;
@@ -222,6 +222,28 @@ public class ReporteInventarioController {
         )));
     }
 
+    @GetMapping("/salidas-por-os")
+    public ResponseEntity<ApiResponse<SalidaValorizadaOsReporteResponse>> listarSalidasValorizadasPorOs(
+            @RequestParam(required = false) String fechaDesde,
+            @RequestParam(required = false) String fechaHasta,
+            @RequestParam(required = false) String orden,
+            @RequestParam(required = false) String ordenTrabajo,
+            @RequestParam(required = false) Long productoId,
+            @RequestParam(required = false) EstadoMovimientoInventario estado,
+            @PageableDefault(size = 20) Pageable pageable,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(reporteInventarioService.obtenerSalidasValorizadasPorOs(
+                parseFechaDesde(fechaDesde),
+                parseFechaHastaExclusiva(fechaHasta),
+                firstNonBlank(orden, ordenTrabajo),
+                productoId,
+                estado,
+                puedeVerCostos(authentication),
+                pageable
+        )));
+    }
+
     @GetMapping("/productos-bajo-minimo")
     public ResponseEntity<ApiResponse<Page<ProductoBajoMinimoReporteResponse>>> listarProductosBajoMinimo(
             @RequestParam(required = false) Long almacenId,
@@ -248,6 +270,66 @@ public class ReporteInventarioController {
         return archivoResponse(archivo, MediaType.APPLICATION_PDF, true);
     }
 
+    @GetMapping("/movimientos/excel")
+    @PreAuthorize("(hasAuthority('REPORTE_VER') and hasAuthority('REPORTE_EXPORTAR')) or hasRole('ADMIN')")
+    public ResponseEntity<byte[]> exportarMovimientos(
+            @RequestParam(required = false) String fechaDesde,
+            @RequestParam(required = false) String fechaHasta,
+            @RequestParam(required = false) TipoMovimientoInventario tipoMovimiento,
+            @RequestParam(required = false) EstadoMovimientoInventario estado,
+            @RequestParam(required = false) Long almacenId,
+            @RequestParam(required = false) Long productoId
+    ) {
+        Page<MovimientoInventarioReporteResponse> reporte = reporteInventarioService.listarMovimientos(
+                parseFechaDesde(fechaDesde),
+                parseFechaHastaExclusiva(fechaHasta),
+                tipoMovimiento,
+                estado,
+                almacenId,
+                productoId,
+                EXPORT_PAGEABLE
+        );
+        byte[] content = excelReportService.generar(
+                "Movimientos",
+                List.of("Movimiento", "Tipo", "Estado", "Fecha", "Documento", "Codigo producto", "Producto",
+                        "Almacen origen", "Almacen destino", "Cantidad", "Costo unitario", "Total linea"),
+                reporte.getContent().stream()
+                        .map(r -> List.<Object>of(
+                                r.numero(), r.tipoMovimiento(), r.estado(), r.fechaMovimiento(),
+                                nullable(r.documentoReferencia()), nullable(r.productoCodigo()),
+                                nullable(r.productoNombre()), nullable(r.almacenOrigenNombre()),
+                                nullable(r.almacenDestinoNombre()), nullable(r.cantidad()),
+                                nullable(r.costoUnitario()), nullable(r.totalLinea())
+                        ))
+                        .toList()
+        );
+        return archivoResponse(new ArchivoReporteResponse("movimientos-inventario.xlsx", content), EXCEL_MEDIA_TYPE, false);
+    }
+
+    @GetMapping("/productos-bajo-minimo/excel")
+    @PreAuthorize("(hasAuthority('REPORTE_VER') and hasAuthority('REPORTE_EXPORTAR')) or hasRole('ADMIN')")
+    public ResponseEntity<byte[]> exportarProductosBajoMinimo(
+            @RequestParam(required = false) Long almacenId,
+            @RequestParam(required = false) Long categoriaId
+    ) {
+        Page<ProductoBajoMinimoReporteResponse> reporte = reporteInventarioService.listarProductosBajoMinimo(
+                almacenId,
+                categoriaId,
+                EXPORT_PAGEABLE
+        );
+        byte[] content = excelReportService.generar(
+                "Productos bajo minimo",
+                List.of("Codigo producto", "Producto", "Categoria", "Almacen", "Cantidad actual", "Stock minimo", "Diferencia"),
+                reporte.getContent().stream()
+                        .map(r -> List.<Object>of(
+                                r.productoCodigo(), r.productoNombre(), nullable(r.categoriaNombre()),
+                                r.almacenNombre(), r.cantidadActual(), r.stockMinimo(), r.diferencia()
+                        ))
+                        .toList()
+        );
+        return archivoResponse(new ArchivoReporteResponse("productos-bajo-minimo.xlsx", content), EXCEL_MEDIA_TYPE, false);
+    }
+
     @GetMapping("/stock-valorizado/excel")
     @PreAuthorize("(hasAuthority('REPORTE_VER') and hasAuthority('REPORTE_EXPORTAR')) or hasRole('ADMIN')")
     public ResponseEntity<byte[]> exportarStockValorizado(
@@ -269,10 +351,10 @@ public class ReporteInventarioController {
         );
         byte[] content = excelReportService.generar(
                 "Stock valorizado",
-                List.of("Codigo", "Producto", "Familia", "Subfamilia", "Tipo articulo", "Marca", "Unidad", "Almacen", "Ubicacion", "Cantidad", "Stock minimo", "Stock maximo", "Costo promedio", "Valor total", "Estado"),
+                List.of("Codigo", "Producto", "Tipo articulo", "Marca", "Unidad", "Almacen", "Ubicacion", "Cantidad", "Stock minimo", "Stock maximo", "Costo promedio", "Valor total", "Estado"),
                 reporte.registros().getContent().stream()
                         .map(r -> List.<Object>of(
-                                r.codigoProducto(), r.nombreProducto(), r.familia(), nullable(r.subfamilia()), r.tipoArticulo(), nullable(r.marca()), r.unidadMedida(),
+                                r.codigoProducto(), r.nombreProducto(), r.tipoArticulo(), nullable(r.marca()), r.unidadMedida(),
                                 r.almacen(), nullable(r.ubicacion()), r.cantidadActual(), r.stockMinimo(), nullable(r.stockMaximo()), nullable(r.costoPromedio()), nullable(r.valorTotal()), r.estadoStock()
                         ))
                         .toList()
@@ -339,6 +421,47 @@ public class ReporteInventarioController {
                         .toList()
         );
         return archivoResponse(new ArchivoReporteResponse("salidas-detalle.xlsx", content), EXCEL_MEDIA_TYPE, false);
+    }
+
+    @GetMapping("/salidas-por-os/excel")
+    @PreAuthorize("(hasAuthority('REPORTE_VER') and hasAuthority('REPORTE_EXPORTAR')) or hasRole('ADMIN')")
+    public ResponseEntity<byte[]> exportarSalidasValorizadasPorOs(
+            @RequestParam(required = false) String fechaDesde,
+            @RequestParam(required = false) String fechaHasta,
+            @RequestParam(required = false) String orden,
+            @RequestParam(required = false) String ordenTrabajo,
+            @RequestParam(required = false) Long productoId,
+            @RequestParam(required = false) EstadoMovimientoInventario estado,
+            Authentication authentication
+    ) {
+        SalidaValorizadaOsReporteResponse reporte = reporteInventarioService.obtenerSalidasValorizadasPorOs(
+                parseFechaDesde(fechaDesde),
+                parseFechaHastaExclusiva(fechaHasta),
+                firstNonBlank(orden, ordenTrabajo),
+                productoId,
+                estado,
+                puedeVerCostos(authentication),
+                EXPORT_PAGEABLE
+        );
+        byte[] content = excelReportService.generar(
+                "Salidas valorizadas por OS",
+                List.of("Fecha", "Movimiento", "Estado", "OS", "Codigo", "Producto", "Unidad", "Cantidad",
+                        "Costo inventario unitario", "Costo inventario total", "Costo base comercial", "Recargo %",
+                        "Valor venta unitario sin IGV", "Valor venta total sin IGV", "IGV unitario", "IGV total",
+                        "Precio unitario con IGV", "Precio total con IGV", "Diferencia comercial sin IGV"),
+                reporte.registros().getContent().stream()
+                        .map(r -> List.<Object>of(
+                                r.fecha(), r.numeroMovimiento(), r.estado(), nullable(r.ordenTrabajo()), r.codigoProducto(),
+                                r.descripcionProducto(), r.unidadMedida(), r.cantidad(), nullable(r.costoInventarioUnitario()),
+                                nullable(r.costoInventarioTotal()), nullable(r.costoBaseComercialUnitarioSinIgv()),
+                                nullable(r.recargoAplicadoPct()), nullable(r.valorVentaUnitarioSinIgv()),
+                                nullable(r.valorVentaTotalSinIgv()), nullable(r.igvUnitario()), nullable(r.igvTotal()),
+                                nullable(r.precioVentaUnitarioConIgv()), nullable(r.precioVentaTotalConIgv()),
+                                nullable(r.diferenciaComercialSinIgv())
+                        ))
+                        .toList()
+        );
+        return archivoResponse(new ArchivoReporteResponse("salidas-valorizadas-por-os.xlsx", content), EXCEL_MEDIA_TYPE, false);
     }
 
     @GetMapping("/entradas-proveedor/excel")
@@ -414,6 +537,13 @@ public class ReporteInventarioController {
             return LocalDate.parse(normalized).plusDays(1).atStartOfDay();
         }
         return LocalDateTime.parse(normalized);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        return second;
     }
 
     private Object nullable(Object value) {

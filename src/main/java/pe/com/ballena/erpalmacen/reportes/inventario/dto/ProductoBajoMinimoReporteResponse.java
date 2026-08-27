@@ -10,6 +10,7 @@ public record ProductoBajoMinimoReporteResponse(
         String categoriaNombre,
         Long almacenId,
         String almacenNombre,
+        String almacenCodigo,
         BigDecimal cantidadActual,
         BigDecimal stockMinimo,
         BigDecimal diferencia

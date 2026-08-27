@@ -93,6 +93,30 @@ public class MovimientoDetalleEntity {
     @Column(name = "diferencia_valorizacion", precision = 18, scale = 6)
     private BigDecimal diferenciaValorizacion;
 
+    @Column(name = "costo_base_comercial_sin_igv", precision = 18, scale = 2)
+    private BigDecimal costoBaseComercialSinIgv;
+
+    @Column(name = "recargo_comercial_pct", precision = 7, scale = 2)
+    private BigDecimal recargoComercialPct;
+
+    @Column(name = "valor_venta_unitario_sin_igv", precision = 18, scale = 2)
+    private BigDecimal valorVentaUnitarioSinIgv;
+
+    @Column(name = "igv_unitario", precision = 18, scale = 2)
+    private BigDecimal igvUnitario;
+
+    @Column(name = "precio_venta_unitario_con_igv", precision = 18, scale = 2)
+    private BigDecimal precioVentaUnitarioConIgv;
+
+    @Column(name = "valor_venta_total_sin_igv", precision = 18, scale = 2)
+    private BigDecimal valorVentaTotalSinIgv;
+
+    @Column(name = "igv_total", precision = 18, scale = 2)
+    private BigDecimal igvTotal;
+
+    @Column(name = "precio_venta_total_con_igv", precision = 18, scale = 2)
+    private BigDecimal precioVentaTotalConIgv;
+
     @Column(length = 255)
     private String observacion;
 
@@ -282,6 +306,70 @@ public class MovimientoDetalleEntity {
 
     public void setDiferenciaValorizacion(BigDecimal diferenciaValorizacion) {
         this.diferenciaValorizacion = diferenciaValorizacion;
+    }
+
+    public BigDecimal getCostoBaseComercialSinIgv() {
+        return costoBaseComercialSinIgv;
+    }
+
+    public void setCostoBaseComercialSinIgv(BigDecimal costoBaseComercialSinIgv) {
+        this.costoBaseComercialSinIgv = costoBaseComercialSinIgv;
+    }
+
+    public BigDecimal getRecargoComercialPct() {
+        return recargoComercialPct;
+    }
+
+    public void setRecargoComercialPct(BigDecimal recargoComercialPct) {
+        this.recargoComercialPct = recargoComercialPct;
+    }
+
+    public BigDecimal getValorVentaUnitarioSinIgv() {
+        return valorVentaUnitarioSinIgv;
+    }
+
+    public void setValorVentaUnitarioSinIgv(BigDecimal valorVentaUnitarioSinIgv) {
+        this.valorVentaUnitarioSinIgv = valorVentaUnitarioSinIgv;
+    }
+
+    public BigDecimal getIgvUnitario() {
+        return igvUnitario;
+    }
+
+    public void setIgvUnitario(BigDecimal igvUnitario) {
+        this.igvUnitario = igvUnitario;
+    }
+
+    public BigDecimal getPrecioVentaUnitarioConIgv() {
+        return precioVentaUnitarioConIgv;
+    }
+
+    public void setPrecioVentaUnitarioConIgv(BigDecimal precioVentaUnitarioConIgv) {
+        this.precioVentaUnitarioConIgv = precioVentaUnitarioConIgv;
+    }
+
+    public BigDecimal getValorVentaTotalSinIgv() {
+        return valorVentaTotalSinIgv;
+    }
+
+    public void setValorVentaTotalSinIgv(BigDecimal valorVentaTotalSinIgv) {
+        this.valorVentaTotalSinIgv = valorVentaTotalSinIgv;
+    }
+
+    public BigDecimal getIgvTotal() {
+        return igvTotal;
+    }
+
+    public void setIgvTotal(BigDecimal igvTotal) {
+        this.igvTotal = igvTotal;
+    }
+
+    public BigDecimal getPrecioVentaTotalConIgv() {
+        return precioVentaTotalConIgv;
+    }
+
+    public void setPrecioVentaTotalConIgv(BigDecimal precioVentaTotalConIgv) {
+        this.precioVentaTotalConIgv = precioVentaTotalConIgv;
     }
 
     public String getObservacion() {

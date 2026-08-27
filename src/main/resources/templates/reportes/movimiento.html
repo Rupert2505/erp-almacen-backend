@@ -5,7 +5,7 @@
     <style>
         @page {
             size: A4;
-            margin: 18mm 12mm 20mm 12mm;
+            margin: 12mm 10mm 16mm 10mm;
             @bottom-right {
                 content: "Pagina " counter(page) " de " counter(pages);
                 font-size: 9px;
@@ -14,72 +14,124 @@
         }
         body {
             font-family: Arial, sans-serif;
-            font-size: 11px;
-            color: #222;
+            font-size: 10.5px;
+            line-height: 1.35;
+            color: #1f2937;
+            margin: 0;
         }
         .header {
             display: table;
             width: 100%;
-            border-bottom: 2px solid #1f2937;
-            padding-bottom: 10px;
-            margin-bottom: 14px;
+            border-bottom: 2px solid #0891b2;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
         }
         .header > div {
             display: table-cell;
-            vertical-align: top;
+            vertical-align: middle;
+        }
+        .company-logo {
+            width: 42px;
+            height: 42px;
+            margin-right: 9px;
+            vertical-align: middle;
+        }
+        .brand-copy {
+            display: inline-block;
+            vertical-align: middle;
         }
         .company {
             font-size: 18px;
             font-weight: bold;
+            color: #0f172a;
         }
         .doc-title {
             text-align: right;
-            font-size: 17px;
+            font-size: 16px;
             font-weight: bold;
+            color: #0f172a;
         }
         .muted {
             color: #666;
         }
         .section-title {
             font-weight: bold;
+            color: #164e63;
+            background: #ecfeff;
+            border-left: 3px solid #06b6d4;
             margin: 12px 0 6px;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 3px;
+            padding: 5px 7px;
         }
         .grid {
             width: 100%;
             border-collapse: collapse;
         }
         .grid td {
+            border-bottom: 1px solid #e5e7eb;
             padding: 4px 6px;
             vertical-align: top;
         }
         .label {
             font-weight: bold;
             width: 18%;
-            color: #374151;
+            color: #475569;
         }
         table.detail {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
             margin-top: 8px;
         }
         table.detail th,
         table.detail td {
             border: 1px solid #d1d5db;
-            padding: 5px;
+            padding: 5px 4px;
+            word-wrap: break-word;
         }
         table.detail th {
-            background: #f3f4f6;
+            background: #e2e8f0;
+            color: #334155;
+            font-size: 9px;
+            text-transform: uppercase;
             text-align: left;
+        }
+        table.detail thead {
+            display: table-header-group;
+        }
+        table.detail tbody tr {
+            page-break-inside: avoid;
+        }
+        table.detail tbody tr:nth-child(even) {
+            background: #f8fafc;
+        }
+        .col-code {
+            width: 14%;
+        }
+        .col-product {
+            width: 32%;
+        }
+        .col-unit {
+            width: 10%;
+        }
+        .col-quantity {
+            width: 12%;
+        }
+        .col-cost {
+            width: 16%;
+        }
+        .product {
+            font-weight: bold;
+            color: #0f172a;
         }
         .number {
             text-align: right;
+            white-space: nowrap;
         }
         .signatures {
             display: table;
             width: 100%;
-            margin-top: 42px;
+            margin-top: 34px;
+            page-break-inside: avoid;
         }
         .signature {
             display: table-cell;
@@ -90,12 +142,10 @@
             font-weight: bold;
         }
         .footer {
-            margin-top: 20px;
+            margin-top: 16px;
             color: #666;
             font-size: 9px;
-        }
-        .page-info {
-            float: right;
+            page-break-inside: avoid;
         }
     </style>
 </head>
@@ -151,6 +201,10 @@
         <td class="label">Motivo</td>
         <td colspan="3" th:text="${movimiento.motivoMovimiento}">Motivo</td>
     </tr>
+    <tr th:if="${movimiento.personalRetira != null}">
+        <td class="label">Personal retira/solicita</td>
+        <td colspan="3" th:text="${movimiento.personalRetira.numeroDocumento + ' - ' + movimiento.personalRetira.nombres + (movimiento.personalRetira.apellidos != null ? ' ' + movimiento.personalRetira.apellidos : '')}">Personal</td>
+    </tr>
     <tr th:if="${movimiento.observacion != null}">
         <td class="label">Observacion</td>
         <td colspan="3" th:text="${movimiento.observacion}">Observacion</td>
@@ -159,24 +213,32 @@
 
 <div class="section-title">Detalle</div>
 <table class="detail">
+    <colgroup>
+        <col class="col-code"/>
+        <col class="col-product"/>
+        <col class="col-unit"/>
+        <col class="col-quantity"/>
+        <col class="col-cost" th:if="${mostrarCostos}"/>
+        <col class="col-cost" th:if="${mostrarCostos}"/>
+    </colgroup>
     <thead>
     <tr>
         <th>Codigo</th>
         <th>Producto</th>
         <th>Unidad</th>
         <th class="number">Cantidad</th>
-        <th class="number" th:if="${mostrarCostos}">Costo unitario</th>
-        <th class="number" th:if="${mostrarCostos}">Valor total</th>
+        <th class="number" th:if="${mostrarCostos}">Costo unit. (S/)</th>
+        <th class="number" th:if="${mostrarCostos}">Valor total (S/)</th>
     </tr>
     </thead>
     <tbody>
     <tr th:each="detalle : ${detalles}">
-        <td th:text="${detalle.producto.codigo}">P001</td>
-        <td th:text="${detalle.producto.nombre}">Producto</td>
-        <td th:text="${detalle.producto.unidadMedida.abreviatura}">UND</td>
-        <td class="number" th:text="${detalle.cantidad}">0</td>
-        <td class="number" th:if="${mostrarCostos}" th:text="${detalle.costoUnitario}">0</td>
-        <td class="number" th:if="${mostrarCostos}" th:text="${detalle.totalLinea}">0</td>
+        <td th:text="${detalle.productoCodigo}">P001</td>
+        <td class="product" th:text="${detalle.productoNombre}">Producto</td>
+        <td th:text="${detalle.unidadAbreviatura}">UND</td>
+        <td class="number" th:text="${detalle.cantidad != null ? #numbers.formatDecimal(detalle.cantidad, 1, 'COMMA', 2, 'POINT') : '-'}">0.00</td>
+        <td class="number" th:if="${mostrarCostos}" th:text="${detalle.costoUnitario != null ? #numbers.formatDecimal(detalle.costoUnitario, 1, 'COMMA', 2, 'POINT') : '-'}">0.00</td>
+        <td class="number" th:if="${mostrarCostos}" th:text="${detalle.totalLinea != null ? #numbers.formatDecimal(detalle.totalLinea, 1, 'COMMA', 2, 'POINT') : '-'}">0.00</td>
     </tr>
     </tbody>
 </table>

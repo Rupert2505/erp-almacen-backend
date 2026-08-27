@@ -9,6 +9,7 @@ import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalle
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoInventarioEntity;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -30,13 +31,37 @@ public class KardexService {
             StockService.StockResultado stockResultado,
             String observacion
     ) {
+        return registrarEnFecha(
+                movimiento,
+                detalle,
+                almacen,
+                ubicacion,
+                entrada,
+                salida,
+                stockResultado,
+                movimiento.getFechaMovimiento(),
+                observacion
+        );
+    }
+
+    public KardexEntity registrarEnFecha(
+            MovimientoInventarioEntity movimiento,
+            MovimientoDetalleEntity detalle,
+            AlmacenEntity almacen,
+            UbicacionAlmacenEntity ubicacion,
+            BigDecimal entrada,
+            BigDecimal salida,
+            StockService.StockResultado stockResultado,
+            LocalDateTime fechaMovimiento,
+            String observacion
+    ) {
         KardexEntity kardex = new KardexEntity();
         kardex.setMovimiento(movimiento);
         kardex.setMovimientoDetalle(detalle);
         kardex.setProducto(detalle.getProducto());
         kardex.setAlmacen(almacen);
         kardex.setUbicacion(ubicacion);
-        kardex.setFechaMovimiento(movimiento.getFechaMovimiento());
+        kardex.setFechaMovimiento(fechaMovimiento);
         kardex.setTipoMovimiento(movimiento.getTipoMovimiento());
         kardex.setNumeroMovimiento(movimiento.getNumero());
         kardex.setEntrada(entrada);

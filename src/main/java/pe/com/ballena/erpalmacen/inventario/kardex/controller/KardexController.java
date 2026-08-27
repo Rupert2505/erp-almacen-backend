@@ -2,6 +2,7 @@ package pe.com.ballena.erpalmacen.inventario.kardex.controller;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -39,7 +40,7 @@ public class KardexController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fechaDesde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fechaHasta,
             @RequestParam(required = false) String texto,
-            @PageableDefault(sort = "fechaMovimiento") Pageable pageable
+            @PageableDefault(sort = {"fechaMovimiento", "id"}, direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(ApiResponse.ok(
                 kardexConsultaService.listar(
@@ -61,7 +62,7 @@ public class KardexController {
             @PathVariable Long productoId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fechaDesde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fechaHasta,
-            @PageableDefault(sort = "fechaMovimiento") Pageable pageable
+            @PageableDefault(sort = {"fechaMovimiento", "id"}, direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(ApiResponse.ok(
                 kardexConsultaService.listarPorProducto(productoId, fechaDesde, fechaHasta, pageable)
@@ -75,7 +76,7 @@ public class KardexController {
             @PathVariable Long almacenId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fechaDesde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fechaHasta,
-            @PageableDefault(sort = "fechaMovimiento") Pageable pageable
+            @PageableDefault(sort = {"fechaMovimiento", "id"}, direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(ApiResponse.ok(
                 kardexConsultaService.listarPorProductoYAlmacen(productoId, almacenId, fechaDesde, fechaHasta, pageable)

@@ -13,6 +13,7 @@ import pe.com.ballena.erpalmacen.almacen.ubicaciones.entity.UbicacionAlmacenEnti
 import pe.com.ballena.erpalmacen.inventario.kardex.entity.KardexEntity;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalleEntity;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoInventarioEntity;
+import pe.com.ballena.erpalmacen.inventario.service.ValorizacionComercialService;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.stock.entity.StockActualEntity;
@@ -34,14 +35,19 @@ import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaInventarioAgrupac
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaInventarioReporteResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaInventarioResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaInventarioResumenResponse;
+import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaValorizadaOsReporteResponse;
+import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaValorizadaOsResponse;
+import pe.com.ballena.erpalmacen.reportes.inventario.dto.SalidaValorizadaOsResumenResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.StockValorizadoReporteResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.StockValorizadoResponse;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.StockValorizadoResumenResponse;
 import pe.com.ballena.erpalmacen.shared.exception.ResourceNotFoundException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -49,9 +55,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 @Service
 public class ReporteInventarioService {
+
+    private static final int COST_SCALE = 6;
 
     private static final EnumSet<TipoMovimientoInventario> TIPOS_SALIDA = EnumSet.of(
             TipoMovimientoInventario.SALIDA_CONSUMO,
@@ -219,25 +228,13 @@ public class ReporteInventarioService {
             throw new ResourceNotFoundException("Ubicacion no encontrada");
         }
 
-        KardexEntity saldoInicial = obtenerSaldoInicial(productoId, almacenId, ubicacionId, fechaDesde);
-        BigDecimal saldoInicialCantidad = saldoInicial == null ? BigDecimal.ZERO : saldoInicial.getSaldoFinal();
-        BigDecimal saldoInicialCosto = saldoInicial == null ? null : saldoInicial.getCostoPromedio();
-        BigDecimal saldoInicialValor = valor(saldoInicialCantidad, saldoInicialCosto);
+        KardexEstadoConsolidado saldoInicial = fechaDesde == null
+                ? KardexEstadoConsolidado.vacio()
+                : consolidarEstadoKardex(productoId, almacenId, ubicacionId, fechaDesde);
 
         QueryParts parts = filtrosKardex(productoId, almacenId, ubicacionId, fechaDesde, fechaHasta);
-        String query = """
-                select k
-                from KardexEntity k
-                join fetch k.movimiento m
-                join fetch k.movimientoDetalle d
-                join fetch k.producto p
-                join fetch p.unidadMedida um
-                join fetch k.almacen a
-                join fetch k.usuario u
-                left join fetch k.ubicacion ub
-                """;
         List<KardexEntity> kardex = listQuery(
-                query + parts.where() + " order by k.fechaMovimiento asc, k.id asc",
+                kardexSelect() + parts.where() + " order by k.fechaMovimiento asc, k.id asc",
                 KardexEntity.class,
                 parts.params()
         );
@@ -247,9 +244,7 @@ public class ReporteInventarioService {
 
         BigDecimal totalEntradas = kardex.stream().map(KardexEntity::getEntrada).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalSalidas = kardex.stream().map(KardexEntity::getSalida).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal saldoFinalCantidad = kardex.isEmpty() ? saldoInicialCantidad : kardex.get(kardex.size() - 1).getSaldoFinal();
-        BigDecimal costoPromedioFinal = kardex.isEmpty() ? saldoInicialCosto : kardex.get(kardex.size() - 1).getCostoPromedio();
-        BigDecimal valorSaldoFinal = valor(saldoFinalCantidad, costoPromedioFinal);
+        KardexEstadoConsolidado saldoFinal = consolidarEstadoKardex(productoId, almacenId, ubicacionId, fechaHasta);
 
         KardexValorizadoCabeceraResponse cabecera = new KardexValorizadoCabeceraResponse(
                 producto.getId(),
@@ -262,16 +257,16 @@ public class ReporteInventarioService {
                 ubicacion == null ? null : ubicacion.getNombre(),
                 fechaDesde,
                 fechaHasta,
-                saldoInicialCantidad,
-                verCostos ? saldoInicialCosto : null,
-                verCostos ? saldoInicialValor : null
+                saldoInicial.saldoCantidad(),
+                verCostos ? saldoInicial.costoPromedio() : null,
+                verCostos ? saldoInicial.valorSaldo() : null
         );
         KardexValorizadoResumenResponse resumen = new KardexValorizadoResumenResponse(
                 totalEntradas,
                 totalSalidas,
-                saldoFinalCantidad,
-                verCostos ? costoPromedioFinal : null,
-                verCostos ? valorSaldoFinal : null
+                saldoFinal.saldoCantidad(),
+                verCostos ? saldoFinal.costoPromedio() : null,
+                verCostos ? saldoFinal.valorSaldo() : null
         );
         return new KardexValorizadoResponse(cabecera, detalles, resumen);
     }
@@ -396,6 +391,40 @@ public class ReporteInventarioService {
                 registros,
                 calcularResumenSalidas(todos, verCostos),
                 agruparSalidas(todos, agruparPor, verCostos)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public SalidaValorizadaOsReporteResponse obtenerSalidasValorizadasPorOs(
+            LocalDateTime fechaDesde,
+            LocalDateTime fechaHasta,
+            String ordenTrabajo,
+            Long productoId,
+            EstadoMovimientoInventario estado,
+            boolean verCostos,
+            Pageable pageable
+    ) {
+        QueryParts parts = filtrosSalidasValorizadasPorOs(
+                fechaDesde,
+                fechaHasta,
+                ordenTrabajo,
+                productoId,
+                estado == null ? EstadoMovimientoInventario.CONFIRMADO : estado
+        );
+        String select = detalleSalidaVentaOsSelect(true);
+        String count = detalleSalidaVentaOsSelect(false).replace("select d", "select count(d.id)");
+        String order = " order by m.ordenTrabajo asc, m.fechaMovimiento desc, m.id desc, d.id asc";
+        List<MovimientoDetalleEntity> detalles = pagedQuery(select + parts.where() + order, MovimientoDetalleEntity.class, parts.params(), pageable);
+        Long total = countQuery(count + parts.where(), parts.params());
+        Page<SalidaValorizadaOsResponse> registros = new PageImpl<>(
+                detalles.stream().map(d -> toSalidaValorizadaOs(d, verCostos)).toList(),
+                pageable,
+                total
+        );
+        List<MovimientoDetalleEntity> todos = listQuery(select + parts.where(), MovimientoDetalleEntity.class, parts.params());
+        return new SalidaValorizadaOsReporteResponse(
+                registros,
+                resumirSalidasValorizadasPorOs(todos, verCostos)
         );
     }
 
@@ -626,6 +655,31 @@ public class ReporteInventarioService {
         return new QueryParts(toWhere(predicates), params);
     }
 
+    private QueryParts filtrosSalidasValorizadasPorOs(
+            LocalDateTime fechaDesde,
+            LocalDateTime fechaHasta,
+            String ordenTrabajo,
+            Long productoId,
+            EstadoMovimientoInventario estado
+    ) {
+        List<String> predicates = new ArrayList<>();
+        Map<String, Object> params = new HashMap<>();
+        predicates.add("m.tipoMovimiento = :tipoMovimiento");
+        params.put("tipoMovimiento", TipoMovimientoInventario.SALIDA_VENTA);
+        predicates.add("m.estado = :estado");
+        params.put("estado", estado);
+        addDateFilters(predicates, params, fechaDesde, fechaHasta);
+        if (ordenTrabajo != null && !ordenTrabajo.isBlank()) {
+            predicates.add("lower(m.ordenTrabajo) like :ordenTrabajo");
+            params.put("ordenTrabajo", "%" + ordenTrabajo.trim().toLowerCase() + "%");
+        }
+        if (productoId != null) {
+            predicates.add("p.id = :productoId");
+            params.put("productoId", productoId);
+        }
+        return new QueryParts(toWhere(predicates), params);
+    }
+
     private void addDateFilters(
             List<String> predicates,
             Map<String, Object> params,
@@ -699,7 +753,7 @@ public class ReporteInventarioService {
                 producto.getSubfamilia() == null ? null : producto.getSubfamilia().getNombre(),
                 producto.getTipoArticulo().getNombre(),
                 producto.getMarca() == null ? null : producto.getMarca().getNombre(),
-                producto.getUnidadMedida().getNombre(),
+                producto.getUnidadMedida().getAbreviatura(),
                 almacen.getId(),
                 almacen.getNombre(),
                 ubicacion == null ? null : ubicacion.getId(),
@@ -736,10 +790,12 @@ public class ReporteInventarioService {
                 movimiento.getComprobanteNumero(),
                 movimiento.getComprobanteFechaEmision(),
                 almacenDestino == null ? null : almacenDestino.getNombre(),
+                almacenDestino == null ? null : almacenDestino.getCodigo(),
                 producto.getId(),
                 producto.getCodigo(),
                 producto.getNombre(),
                 producto.getUnidadMedida().getNombre(),
+                producto.getUnidadMedida().getAbreviatura(),
                 detalle.getCantidad(),
                 verCostos ? detalle.getCostoUnitario() : null,
                 verCostos ? detalle.getTotalLinea() : null,
@@ -762,18 +818,48 @@ public class ReporteInventarioService {
                 movimiento.getTipoMovimiento(),
                 movimiento.getEstado(),
                 almacenOrigen == null ? null : almacenOrigen.getNombre(),
+                almacenOrigen == null ? null : almacenOrigen.getCodigo(),
                 ubicacionOrigen == null ? null : ubicacionOrigen.getNombre(),
                 producto.getId(),
                 producto.getCodigo(),
                 producto.getNombre(),
                 producto.getFamilia().getNombre(),
                 producto.getUnidadMedida().getNombre(),
+                producto.getUnidadMedida().getAbreviatura(),
                 detalle.getCantidad(),
                 verCostos ? costo : null,
                 verCostos ? valor(detalle.getCantidad(), costo) : null,
                 movimiento.getUsuario().getUsername(),
                 movimiento.getMotivoMovimiento(),
                 movimiento.getObservacion()
+        );
+    }
+
+    private SalidaValorizadaOsResponse toSalidaValorizadaOs(MovimientoDetalleEntity detalle, boolean verCostos) {
+        MovimientoInventarioEntity movimiento = detalle.getMovimiento();
+        ProductoEntity producto = detalle.getProducto();
+        return new SalidaValorizadaOsResponse(
+                movimiento.getFechaMovimiento(),
+                movimiento.getId(),
+                movimiento.getNumero(),
+                movimiento.getEstado(),
+                movimiento.getOrdenTrabajo(),
+                producto.getId(),
+                producto.getCodigo(),
+                producto.getNombre(),
+                detalle.getCantidad(),
+                producto.getUnidadMedida().getNombre(),
+                verCostos ? costoSalida(detalle) : null,
+                verCostos ? costoInventarioTotal(detalle) : null,
+                verCostos ? detalle.getCostoBaseComercialSinIgv() : null,
+                verCostos ? detalle.getRecargoComercialPct() : null,
+                verCostos ? detalle.getValorVentaUnitarioSinIgv() : null,
+                verCostos ? detalle.getValorVentaTotalSinIgv() : null,
+                verCostos ? detalle.getIgvUnitario() : null,
+                verCostos ? detalle.getIgvTotal() : null,
+                verCostos ? detalle.getPrecioVentaUnitarioConIgv() : null,
+                verCostos ? detalle.getPrecioVentaTotalConIgv() : null,
+                verCostos ? diferenciaComercialSinIgv(detalle) : null
         );
     }
 
@@ -814,6 +900,7 @@ public class ReporteInventarioService {
                 categoria == null ? null : categoria.getNombre(),
                 almacen.getId(),
                 almacen.getNombre(),
+                almacen.getCodigo(),
                 stock.getCantidadActual(),
                 producto.getStockMinimo(),
                 producto.getStockMinimo().subtract(stock.getCantidadActual())
@@ -825,6 +912,17 @@ public class ReporteInventarioService {
         long productos = stock.stream().map(s -> s.getProducto().getId()).distinct().count();
         BigDecimal unidades = stock.stream().map(StockActualEntity::getCantidadActual).reduce(BigDecimal.ZERO, BigDecimal::add);
         long bajoMinimo = stock.stream().filter(s -> estadoStock(s) == EstadoStockReporte.BAJO_MINIMO).count();
+        Map<Long, BigDecimal> saldoPorProductoActivo = new HashMap<>();
+        stock.stream()
+                .filter(s -> s.getProducto().isActivo())
+                .forEach(s -> saldoPorProductoActivo.merge(
+                        s.getProducto().getId(),
+                        s.getCantidadActual(),
+                        BigDecimal::add
+                ));
+        long productosSinStockActivos = saldoPorProductoActivo.values().stream()
+                .filter(cantidad -> cantidad.compareTo(BigDecimal.ZERO) <= 0)
+                .count();
         BigDecimal valorTotal = stock.stream()
                 .map(s -> valor(s.getCantidadActual(), s.getCostoPromedio()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -832,7 +930,8 @@ public class ReporteInventarioService {
                 productos,
                 unidades,
                 verCostos ? valorTotal : null,
-                bajoMinimo
+                bajoMinimo,
+                productosSinStockActivos
         );
     }
 
@@ -880,6 +979,38 @@ public class ReporteInventarioService {
         );
     }
 
+    private List<SalidaValorizadaOsResumenResponse> resumirSalidasValorizadasPorOs(
+            List<MovimientoDetalleEntity> detalles,
+            boolean verCostos
+    ) {
+        Map<String, List<MovimientoDetalleEntity>> porOrden = new LinkedHashMap<>();
+        detalles.stream()
+                .sorted(Comparator.comparing(d -> ordenTrabajoReporte(d.getMovimiento())))
+                .forEach(d -> porOrden.computeIfAbsent(ordenTrabajoReporte(d.getMovimiento()), ignored -> new ArrayList<>()).add(d));
+
+        return porOrden.entrySet().stream()
+                .map(entry -> {
+                    List<MovimientoDetalleEntity> detallesOs = entry.getValue();
+                    long movimientos = detallesOs.stream().map(d -> d.getMovimiento().getId()).distinct().count();
+                    BigDecimal costoInventario = sumar(detallesOs, this::costoInventarioTotal);
+                    BigDecimal valorComercial = sumar(detallesOs, MovimientoDetalleEntity::getValorVentaTotalSinIgv);
+                    BigDecimal igv = sumar(detallesOs, MovimientoDetalleEntity::getIgvTotal);
+                    BigDecimal precio = sumar(detallesOs, MovimientoDetalleEntity::getPrecioVentaTotalConIgv);
+                    BigDecimal diferencia = sumar(detallesOs, this::diferenciaComercialSinIgv);
+                    return new SalidaValorizadaOsResumenResponse(
+                            entry.getKey(),
+                            movimientos,
+                            (long) detallesOs.size(),
+                            verCostos ? costoInventario : null,
+                            verCostos ? valorComercial : null,
+                            verCostos ? igv : null,
+                            verCostos ? precio : null,
+                            verCostos ? diferencia : null
+                    );
+                })
+                .toList();
+    }
+
     private List<SalidaInventarioAgrupacionResponse> agruparSalidas(
             List<MovimientoDetalleEntity> detalles,
             String agruparPor,
@@ -918,22 +1049,49 @@ public class ReporteInventarioService {
         };
     }
 
-    private KardexEntity obtenerSaldoInicial(Long productoId, Long almacenId, Long ubicacionId, LocalDateTime fechaDesde) {
-        if (fechaDesde == null) {
+    private KardexEstadoConsolidado consolidarEstadoKardex(
+            Long productoId,
+            Long almacenId,
+            Long ubicacionId,
+            LocalDateTime fechaHasta
+    ) {
+        QueryParts parts = filtrosKardex(productoId, almacenId, ubicacionId, null, fechaHasta);
+        List<KardexEntity> kardex = listQuery(
+                kardexSelect() + parts.where() + " order by k.fechaMovimiento asc, k.id asc",
+                KardexEntity.class,
+                parts.params()
+        );
+        Map<KardexLineaKey, KardexEntity> ultimoPorLinea = new LinkedHashMap<>();
+        kardex.forEach(k -> ultimoPorLinea.put(KardexLineaKey.from(k), k));
+
+        BigDecimal saldo = ultimoPorLinea.values().stream()
+                .map(KardexEntity::getSaldoFinal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal valorSaldo = ultimoPorLinea.values().stream()
+                .map(k -> valor(k.getSaldoFinal(), k.getCostoPromedio()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new KardexEstadoConsolidado(
+                saldo,
+                costoPromedioConsolidado(ultimoPorLinea.values(), saldo, valorSaldo),
+                valorSaldo
+        );
+    }
+
+    private BigDecimal costoPromedioConsolidado(
+            Collection<KardexEntity> lineas,
+            BigDecimal saldo,
+            BigDecimal valorSaldo
+    ) {
+        if (lineas.isEmpty()) {
             return null;
         }
-        QueryParts parts = filtrosKardex(productoId, almacenId, ubicacionId, null, fechaDesde);
-        List<KardexEntity> anteriores = listQuery("""
-                select k
-                from KardexEntity k
-                join fetch k.movimiento m
-                join fetch k.movimientoDetalle d
-                join fetch k.producto p
-                join fetch k.almacen a
-                join fetch k.usuario u
-                left join fetch k.ubicacion ub
-                """ + parts.where() + " order by k.fechaMovimiento desc, k.id desc", KardexEntity.class, parts.params(), 1);
-        return anteriores.isEmpty() ? null : anteriores.get(0);
+        if (lineas.size() == 1) {
+            return lineas.iterator().next().getCostoPromedio();
+        }
+        if (saldo.compareTo(BigDecimal.ZERO) == 0) {
+            return null;
+        }
+        return valorSaldo.divide(saldo, COST_SCALE, RoundingMode.HALF_UP);
     }
 
     private EstadoStockReporte estadoStock(StockActualEntity stock) {
@@ -1034,6 +1192,39 @@ public class ReporteInventarioService {
                 """;
     }
 
+    private String detalleSalidaVentaOsSelect(boolean fetch) {
+        if (fetch) {
+            return """
+                    select d
+                    from MovimientoDetalleEntity d
+                    join fetch d.movimiento m
+                    join fetch d.producto p
+                    join fetch p.unidadMedida um
+                    """;
+        }
+        return """
+                select d
+                from MovimientoDetalleEntity d
+                join d.movimiento m
+                join d.producto p
+                join p.unidadMedida um
+                """;
+    }
+
+    private String kardexSelect() {
+        return """
+                select k
+                from KardexEntity k
+                join fetch k.movimiento m
+                join fetch k.movimientoDetalle d
+                join fetch k.producto p
+                join fetch p.unidadMedida um
+                join fetch k.almacen a
+                join fetch k.usuario u
+                left join fetch k.ubicacion ub
+                """;
+    }
+
     private Long contarMovimientosPorEstado(EstadoMovimientoInventario estado) {
         return entityManager.createQuery(
                         "select count(m.id) from MovimientoInventarioEntity m where m.estado = :estado",
@@ -1055,8 +1246,10 @@ public class ReporteInventarioService {
     private <T> List<T> pagedQuery(String query, Class<T> type, Map<String, Object> params, Pageable pageable) {
         TypedQuery<T> typedQuery = entityManager.createQuery(query, type);
         params.forEach(typedQuery::setParameter);
-        typedQuery.setFirstResult(Math.toIntExact(pageable.getOffset()));
-        typedQuery.setMaxResults(pageable.getPageSize());
+        if (pageable.isPaged()) {
+            typedQuery.setFirstResult(Math.toIntExact(pageable.getOffset()));
+            typedQuery.setMaxResults(pageable.getPageSize());
+        }
         return typedQuery.getResultList();
     }
 
@@ -1090,6 +1283,42 @@ public class ReporteInventarioService {
         return cantidad.multiply(costo);
     }
 
+    private BigDecimal costoInventarioTotal(MovimientoDetalleEntity detalle) {
+        BigDecimal costo = costoSalida(detalle);
+        if (detalle.getCantidad() == null || costo == null) {
+            return null;
+        }
+        return dinero(detalle.getCantidad().multiply(costo));
+    }
+
+    private BigDecimal diferenciaComercialSinIgv(MovimientoDetalleEntity detalle) {
+        BigDecimal valorComercial = detalle.getValorVentaTotalSinIgv();
+        BigDecimal costoInventario = costoInventarioTotal(detalle);
+        if (valorComercial == null || costoInventario == null) {
+            return null;
+        }
+        return dinero(valorComercial.subtract(costoInventario));
+    }
+
+    private BigDecimal sumar(
+            List<MovimientoDetalleEntity> detalles,
+            Function<MovimientoDetalleEntity, BigDecimal> mapper
+    ) {
+        return dinero(detalles.stream()
+                .map(mapper)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+    }
+
+    private BigDecimal dinero(BigDecimal value) {
+        return value == null ? null : value.setScale(ValorizacionComercialService.MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private String ordenTrabajoReporte(MovimientoInventarioEntity movimiento) {
+        String orden = movimiento.getOrdenTrabajo();
+        return orden == null || orden.isBlank() ? "SIN OS" : orden;
+    }
+
     private BigDecimal costoSalida(MovimientoDetalleEntity detalle) {
         List<KardexEntity> kardexSalida = entityManager.createQuery("""
                         select k
@@ -1119,5 +1348,25 @@ public class ReporteInventarioService {
     }
 
     private record QueryParts(String where, Map<String, Object> params) {
+    }
+
+    private record KardexLineaKey(Long productoId, Long almacenId, Long ubicacionId) {
+        static KardexLineaKey from(KardexEntity kardex) {
+            return new KardexLineaKey(
+                    kardex.getProducto().getId(),
+                    kardex.getAlmacen().getId(),
+                    kardex.getUbicacion() == null ? null : kardex.getUbicacion().getId()
+            );
+        }
+    }
+
+    private record KardexEstadoConsolidado(
+            BigDecimal saldoCantidad,
+            BigDecimal costoPromedio,
+            BigDecimal valorSaldo
+    ) {
+        static KardexEstadoConsolidado vacio() {
+            return new KardexEstadoConsolidado(BigDecimal.ZERO, null, BigDecimal.ZERO);
+        }
     }
 }

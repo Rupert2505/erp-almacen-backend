@@ -31,7 +31,7 @@ public class PersonalController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasAuthority('INVENTARIO_SALIDA') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Page<PersonalResponse>>> listar(
             @RequestParam(required = false) String texto,
             @RequestParam(required = false) String search,
@@ -49,13 +49,13 @@ public class PersonalController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasAuthority('INVENTARIO_SALIDA') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<PersonalResponse>> obtener(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(personalService.obtener(id)));
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasAuthority('INVENTARIO_SALIDA') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<PersonalResponse>> crear(@Valid @RequestBody PersonalCreateRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Personal creado correctamente", personalService.crear(request)));
     }

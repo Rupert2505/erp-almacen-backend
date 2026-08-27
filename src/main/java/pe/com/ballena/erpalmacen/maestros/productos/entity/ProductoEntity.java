@@ -68,6 +68,7 @@ public class ProductoEntity {
     @Column(name = "stock_maximo", precision = 18, scale = 4)
     private BigDecimal stockMaximo;
 
+    // Costo base comercial sin IGV. Manual; no participa en stock, kardex ni costo promedio.
     @Column(name = "costo_referencial", precision = 18, scale = 4)
     private BigDecimal costoReferencial;
 

@@ -28,8 +28,36 @@ public record MovimientoDetalleCreateRequest(
 
         Boolean igvRecuperable,
 
+        @DecimalMin(value = "0.0000", message = "El recargo comercial debe ser mayor o igual a cero")
+        BigDecimal recargoComercialPct,
+
         String observacion
 ) {
+    public MovimientoDetalleCreateRequest(
+            Long productoId,
+            Long ubicacionOrigenId,
+            Long ubicacionDestinoId,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario,
+            BigDecimal valorUnitarioSinIgv,
+            BigDecimal tasaIgv,
+            Boolean igvRecuperable,
+            String observacion
+    ) {
+        this(
+                productoId,
+                ubicacionOrigenId,
+                ubicacionDestinoId,
+                cantidad,
+                costoUnitario,
+                valorUnitarioSinIgv,
+                tasaIgv,
+                igvRecuperable,
+                null,
+                observacion
+        );
+    }
+
     public MovimientoDetalleCreateRequest(
             Long productoId,
             Long ubicacionOrigenId,
@@ -44,6 +72,7 @@ public record MovimientoDetalleCreateRequest(
                 ubicacionDestinoId,
                 cantidad,
                 costoUnitario,
+                null,
                 null,
                 null,
                 null,

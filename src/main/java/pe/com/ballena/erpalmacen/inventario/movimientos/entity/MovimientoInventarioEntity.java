@@ -16,6 +16,7 @@ import jakarta.persistence.Table;
 import pe.com.ballena.erpalmacen.almacen.almacenes.entity.AlmacenEntity;
 import pe.com.ballena.erpalmacen.inventario.shared.EstadoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
+import pe.com.ballena.erpalmacen.maestros.personal.entity.PersonalEntity;
 import pe.com.ballena.erpalmacen.maestros.proveedores.entity.ProveedorEntity;
 import pe.com.ballena.erpalmacen.usuarios.entity.UsuarioEntity;
 
@@ -78,6 +79,10 @@ public class MovimientoInventarioEntity {
 
     @Column(length = 120)
     private String solicitante;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "personal_retira_id")
+    private PersonalEntity personalRetira;
 
     @Column(name = "responsable_entrega", length = 120)
     private String responsableEntrega;
@@ -154,6 +159,12 @@ public class MovimientoInventarioEntity {
 
     @Column(name = "anulado_en")
     private LocalDateTime anuladoEn;
+
+    @Column(name = "motivo_anulacion", columnDefinition = "TEXT")
+    private String motivoAnulacion;
+
+    @Column(name = "anulado_por", length = 120)
+    private String anuladoPor;
 
     @Column(name = "motivo_cancelacion", columnDefinition = "TEXT")
     private String motivoCancelacion;
@@ -301,6 +312,14 @@ public class MovimientoInventarioEntity {
 
     public void setSolicitante(String solicitante) {
         this.solicitante = solicitante;
+    }
+
+    public PersonalEntity getPersonalRetira() {
+        return personalRetira;
+    }
+
+    public void setPersonalRetira(PersonalEntity personalRetira) {
+        this.personalRetira = personalRetira;
     }
 
     public String getResponsableEntrega() {
@@ -501,6 +520,22 @@ public class MovimientoInventarioEntity {
 
     public void setAnuladoEn(LocalDateTime anuladoEn) {
         this.anuladoEn = anuladoEn;
+    }
+
+    public String getMotivoAnulacion() {
+        return motivoAnulacion;
+    }
+
+    public void setMotivoAnulacion(String motivoAnulacion) {
+        this.motivoAnulacion = motivoAnulacion;
+    }
+
+    public String getAnuladoPor() {
+        return anuladoPor;
+    }
+
+    public void setAnuladoPor(String anuladoPor) {
+        this.anuladoPor = anuladoPor;
     }
 
     public String getMotivoCancelacion() {

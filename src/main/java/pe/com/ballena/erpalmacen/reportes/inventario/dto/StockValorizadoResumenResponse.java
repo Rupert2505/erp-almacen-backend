@@ -6,6 +6,7 @@ public record StockValorizadoResumenResponse(
         Long cantidadProductos,
         BigDecimal cantidadUnidades,
         BigDecimal valorTotalInventario,
-        Long productosBajoMinimo
+        Long productosBajoMinimo,
+        Long productosSinStockActivos
 ) {
 }

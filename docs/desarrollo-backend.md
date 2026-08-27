@@ -143,6 +143,11 @@ Las migraciones actuales son:
 | V12 | `V12__agregar_prefijo_familia_y_correlativo_productos.sql` | Prefijo de familia y correlativos de producto. |
 | V13 | `V13__ajustar_correlativos_producto_con_guion.sql` | Codigo de producto con formato `PREFIJO-CORRELATIVO`. |
 | V14 | `V14__crear_catalogo_personal.sql` | Catalogo de personal. |
+| V15 | `V15__agregar_devolucion_proveedor.sql` | Devoluciones a proveedor y ajuste de tipos de movimiento. |
+| V16 | `V16__agregar_permisos_reportes_avanzados.sql` | Permisos de reportes avanzados. |
+| V17 | `V17__crear_correlativos_movimiento.sql` | Correlativos separados para movimientos. |
+| V18 | `V18__agregar_igv_y_costo_inventariable_movimiento.sql` | Campos de IGV y costo inventariable de entradas. |
+| V19 | `V19__agregar_valorizacion_comercial_salidas_os.sql` | Snapshot comercial para salidas por OS. |
 
 Reglas:
 
@@ -380,7 +385,7 @@ Producto actualmente usa:
 - Subfamilia opcional.
 - Marca opcional.
 - Unidad de medida obligatoria.
-- Costo referencial.
+- Costo referencial: costo base comercial sin IGV, manual e independiente del inventario.
 - Stock minimo.
 - Stock maximo.
 - Controla lote.
@@ -539,11 +544,41 @@ Reglas por tipo:
 - `ENTRADA_COMPRA`: requiere proveedor, almacen destino y fecha recepcion; aumenta stock.
 - `ENTRADA_AJUSTE`: requiere almacen destino, motivo y observacion; aumenta stock.
 - `SALIDA_CONSUMO`: requiere almacen origen, motivo y observacion; disminuye stock.
-- `SALIDA_VENTA`: requiere almacen origen; disminuye stock.
+- `SALIDA_VENTA`: requiere almacen origen; al confirmar requiere OS en `ordenTrabajo`, costo base comercial y recargo comercial; disminuye stock.
 - `SALIDA_AJUSTE`: requiere almacen origen, motivo y observacion; disminuye stock.
 - `TRANSFERENCIA`: requiere origen y destino diferentes; descuenta origen y suma destino.
 - `AJUSTE_POSITIVO`: requiere almacen destino, motivo y observacion; aumenta stock.
 - `AJUSTE_NEGATIVO`: requiere almacen origen, motivo y observacion; disminuye stock.
+
+### Valorizacion Comercial de Salidas por OS
+
+Aplica solo a movimientos `SALIDA_VENTA`.
+
+- La OS se guarda en `movimientos_inventario.orden_trabajo` y se expone como `ordenTrabajo`.
+- `productos.costo_referencial` se interpreta como costo base comercial sin IGV.
+- El recargo comercial se guarda por detalle en `recargo_comercial_pct`.
+- Al confirmar se copia el costo base comercial del producto al detalle como snapshot historico.
+- Cambios posteriores en `productos.costo_referencial` solo afectan futuras salidas.
+- La anulacion no recalcula ni borra el snapshot comercial.
+- El calculo comercial no modifica stock, kardex ni costo promedio.
+
+Formula:
+
+```text
+importeRecargo = costoBaseComercialSinIgv * recargoComercialPct / 100
+valorVentaUnitarioSinIgv = costoBaseComercialSinIgv * (1 + recargoComercialPct / 100)
+igvUnitario = valorVentaUnitarioSinIgv * 0.18
+precioVentaUnitarioConIgv = valorVentaUnitarioSinIgv + igvUnitario
+valorVentaTotalSinIgv = valorVentaUnitarioSinIgv * cantidad
+igvTotal = valorVentaTotalSinIgv * 0.18
+precioVentaTotalConIgv = valorVentaTotalSinIgv + igvTotal
+diferenciaComercialSinIgv = valorVentaTotalSinIgv - costoInventarioTotal
+```
+
+La tasa IGV esta centralizada como `ValorizacionComercialService.IGV_RATE = 0.18`.
+Los importes comerciales se redondean a 2 decimales con `RoundingMode.HALF_UP`.
+El limite tecnico de recargo es `1000.00%`.
+El costo de inventario informativo se obtiene del costo aplicado por el flujo actual de salida, el mismo que se registra en kardex.
 
 ### Documentos de Entrada
 
@@ -650,6 +685,7 @@ Endpoints:
 - `GET /api/reportes/inventario/stock-valorizado`
 - `GET /api/reportes/inventario/entradas-proveedor`
 - `GET /api/reportes/inventario/salidas`
+- `GET /api/reportes/inventario/salidas-por-os`
 - `GET /api/reportes/inventario/productos-bajo-minimo`
 
 Reglas:
@@ -659,6 +695,10 @@ Reglas:
 - Borradores no afectan stock real.
 - Stock valorizado usa `cantidadActual * costoPromedio`.
 - Si `costoPromedio` es null, el valor se considera cero.
+- `salidas-por-os` considera solo `SALIDA_VENTA`; por defecto usa estado `CONFIRMADO`.
+- `salidas-por-os` filtra por `fechaDesde`, `fechaHasta`, `orden`/`ordenTrabajo`, `productoId` y `estado`.
+- Los anulados solo se suman en `salidas-por-os` si se solicita `estado=ANULADO`.
+- `GET /api/reportes/inventario/salidas-por-os/excel` exporta el detalle comercial por OS.
 
 ## Estandar de Texto
 
@@ -843,4 +883,3 @@ Antes de despliegue productivo:
 - Evaluar indices adicionales despues de pruebas de carga.
 - Definir si se migrara data historica a mayusculas.
 - Completar documentacion de frontend cuando se cierren las fases visuales.
-

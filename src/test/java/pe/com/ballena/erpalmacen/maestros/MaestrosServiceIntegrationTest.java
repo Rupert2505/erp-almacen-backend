@@ -150,8 +150,42 @@ class MaestrosServiceIntegrationTest {
 
         assertThat(producto.nombre()).isEqualTo(("Producto Integral " + suffix).toUpperCase());
         assertThat(producto.descripcion()).isEqualTo(("Descripcion busqueda " + suffix).toUpperCase());
+        assertThat(producto.costoReferencial()).isEqualByComparingTo("8.5000");
         assertThat(actualizado.nombre()).contains("EDITADO");
+        assertThat(actualizado.costoReferencial()).isEqualByComparingTo("9.0000");
         assertThat(actualizado.controlaLote()).isTrue();
+        var costoCero = productoService.actualizar(producto.id(), new ProductoUpdateRequest(
+                producto.codigo(),
+                "Producto Integral Editado " + suffix,
+                "Descripcion editada",
+                tipoArticulo.getId(),
+                familia.id(),
+                null,
+                null,
+                unidad.getId(),
+                new BigDecimal("1.0000"),
+                new BigDecimal("30.0000"),
+                BigDecimal.ZERO,
+                true,
+                false
+        ));
+        assertThat(costoCero.costoReferencial()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThatThrownBy(() -> productoService.actualizar(producto.id(), new ProductoUpdateRequest(
+                producto.codigo(),
+                "Producto Integral Editado " + suffix,
+                "Descripcion editada",
+                tipoArticulo.getId(),
+                familia.id(),
+                null,
+                null,
+                unidad.getId(),
+                new BigDecimal("1.0000"),
+                new BigDecimal("30.0000"),
+                new BigDecimal("-0.0100"),
+                true,
+                false
+        ))).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("costo base comercial sin IGV");
         assertThatThrownBy(() -> productoService.actualizar(producto.id(), new ProductoUpdateRequest(
                 producto.codigo() + "X",
                 "Producto Integral Editado " + suffix,

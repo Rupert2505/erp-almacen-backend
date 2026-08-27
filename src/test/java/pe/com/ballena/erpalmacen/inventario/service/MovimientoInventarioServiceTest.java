@@ -13,6 +13,7 @@ import pe.com.ballena.erpalmacen.almacen.almacenes.repository.AlmacenRepository;
 import pe.com.ballena.erpalmacen.inventario.kardex.repository.KardexRepository;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.DevolucionProveedorDetalleCreateRequest;
+import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoAnulacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoCancelacionRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoDetalleCreateRequest;
 import pe.com.ballena.erpalmacen.inventario.movimientos.dto.MovimientoInventarioCreateRequest;
@@ -25,6 +26,8 @@ import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 import pe.com.ballena.erpalmacen.inventario.stock.repository.StockActualRepository;
 import pe.com.ballena.erpalmacen.maestros.familias.entity.FamiliaEntity;
 import pe.com.ballena.erpalmacen.maestros.familias.repository.FamiliaRepository;
+import pe.com.ballena.erpalmacen.maestros.personal.entity.PersonalEntity;
+import pe.com.ballena.erpalmacen.maestros.personal.repository.PersonalRepository;
 import pe.com.ballena.erpalmacen.maestros.productos.entity.ProductoEntity;
 import pe.com.ballena.erpalmacen.maestros.productos.repository.ProductoRepository;
 import pe.com.ballena.erpalmacen.maestros.productos.service.ProductoService;
@@ -93,6 +96,9 @@ class MovimientoInventarioServiceTest {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
+
+    @Autowired
+    private PersonalRepository personalRepository;
 
     @Test
     void crearMovimientosGeneraCodigoConPrefijoYCorrelativo() {
@@ -470,6 +476,31 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
+    void salidasRegistranPersonalQueRetiraOSolicita() {
+        TestData data = crearDatosBase();
+
+        var salidaConsumo = movimientoInventarioService.crearMovimiento(crearSalidaConsumoRequest(
+                data,
+                false,
+                "SALIDA-PERSONAL-CONSUMO",
+                new BigDecimal("1.0000")
+        ), authentication());
+        var salidaVenta = movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                data,
+                false,
+                "OS-PERSONAL-VENTA",
+                new BigDecimal("1.0000"),
+                null
+        ), authentication());
+
+        assertThat(salidaConsumo.personalRetiraId()).isEqualTo(data.personal().getId());
+        assertThat(salidaConsumo.personalRetiraNumeroDocumento()).isEqualTo(data.personal().getNumeroDocumento());
+        assertThat(salidaConsumo.personalRetiraNombreCompleto())
+                .isEqualTo(data.personal().getNombres() + " " + data.personal().getApellidos());
+        assertThat(salidaVenta.personalRetiraId()).isEqualTo(data.personal().getId());
+    }
+
+    @Test
     void crearTransferenciaConfirmadaDirectaMueveStockEntreAlmacenes() {
         TestData data = crearDatosBase();
         confirmarEntrada(data, new BigDecimal("10.0000"));
@@ -726,7 +757,7 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
-    void entradaAjusteSinObservacionFalla() {
+    void entradaAjusteSinObservacionEsValida() {
         TestData data = crearDatosBase();
         MovimientoInventarioCreateRequest request = crearRequestOperativo(
                 TipoMovimientoInventario.ENTRADA_AJUSTE,
@@ -741,13 +772,14 @@ class MovimientoInventarioServiceTest {
                 null
         );
 
-        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("observacion");
+        var response = movimientoInventarioService.crearMovimiento(request, authentication());
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.BORRADOR);
+        assertThat(response.observacion()).isNull();
     }
 
     @Test
-    void salidaConsumoSinObservacionFalla() {
+    void salidaConsumoSinObservacionEsValida() {
         TestData data = crearDatosBase();
         MovimientoInventarioCreateRequest request = crearRequestOperativo(
                 TipoMovimientoInventario.SALIDA_CONSUMO,
@@ -762,9 +794,11 @@ class MovimientoInventarioServiceTest {
                 null
         );
 
-        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("observacion");
+        var response = movimientoInventarioService.crearMovimiento(request, authentication());
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.BORRADOR);
+        assertThat(response.observacion()).isNull();
+        assertThat(response.personalRetiraId()).isEqualTo(data.personal().getId());
     }
 
     @Test
@@ -810,6 +844,218 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
+    void guardarBorradorSalidaVentaRequiereOrdenServicio() {
+        TestData data = crearDatosBase();
+        data.producto().setCostoReferencial(new BigDecimal("12.7100"));
+        productoRepository.save(data.producto());
+        confirmarEntrada(data, new BigDecimal("10.0000"));
+
+        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                        data,
+                        false,
+                        "   ",
+                        new BigDecimal("2.0000"),
+                        new BigDecimal("35.00")
+                ), authentication()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Orden de Servicio");
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("10.0000");
+    }
+
+    @Test
+    void confirmarSalidaVentaRequiereCostoBaseComercial() {
+        TestData data = crearDatosBase();
+        data.producto().setCostoReferencial(null);
+        productoRepository.save(data.producto());
+        confirmarEntrada(data, new BigDecimal("10.0000"));
+        var borrador = movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                data,
+                false,
+                "OS-100",
+                new BigDecimal("2.0000"),
+                new BigDecimal("35.00")
+        ), authentication());
+
+        assertThatThrownBy(() -> movimientoInventarioService.confirmarMovimiento(borrador.id()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("costo base comercial sin IGV");
+        assertThat(kardexRepository.findByMovimientoId(borrador.id())).isEmpty();
+    }
+
+    @Test
+    void confirmarSalidaVentaRequiereRecargoComercial() {
+        TestData data = crearDatosBase();
+        data.producto().setCostoReferencial(new BigDecimal("12.7100"));
+        productoRepository.save(data.producto());
+        confirmarEntrada(data, new BigDecimal("10.0000"));
+        var borrador = movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                data,
+                false,
+                "OS-100",
+                new BigDecimal("2.0000"),
+                null
+        ), authentication());
+
+        assertThatThrownBy(() -> movimientoInventarioService.confirmarMovimiento(borrador.id()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("recargo comercial");
+        assertThat(kardexRepository.findByMovimientoId(borrador.id())).isEmpty();
+    }
+
+    @Test
+    void salidaVentaConfirmadaGuardaSnapshotComercialYNoModificaCostoPromedio() {
+        TestData data = crearDatosBase();
+        data.producto().setCostoReferencial(new BigDecimal("12.7100"));
+        productoRepository.save(data.producto());
+        confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("5.000000"));
+
+        var primera = movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                data,
+                true,
+                " OS-100 ",
+                new BigDecimal("2.0000"),
+                new BigDecimal("35.00")
+        ), authentication());
+
+        var detalle = primera.detalles().get(0);
+        assertThat(primera.ordenTrabajo()).isEqualTo("OS-100");
+        assertThat(detalle.costoBaseComercialSinIgv()).isEqualByComparingTo("12.71");
+        assertThat(detalle.recargoComercialPct()).isEqualByComparingTo("35.00");
+        assertThat(detalle.valorVentaUnitarioSinIgv()).isEqualByComparingTo("17.16");
+        assertThat(detalle.igvUnitario()).isEqualByComparingTo("3.09");
+        assertThat(detalle.precioVentaUnitarioConIgv()).isEqualByComparingTo("20.25");
+        assertThat(detalle.valorVentaTotalSinIgv()).isEqualByComparingTo("34.32");
+        assertThat(detalle.igvTotal()).isEqualByComparingTo("6.18");
+        assertThat(detalle.precioVentaTotalConIgv()).isEqualByComparingTo("40.50");
+        assertThat(detalle.costoInventarioUnitario()).isEqualByComparingTo("5.000000");
+        assertThat(detalle.costoInventarioTotal()).isEqualByComparingTo("10.000000");
+        assertThat(detalle.diferenciaComercialSinIgv()).isEqualByComparingTo("24.32");
+
+        var stock = stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow();
+        assertThat(stock.getCantidadActual()).isEqualByComparingTo("8.0000");
+        assertThat(stock.getCostoPromedio()).isEqualByComparingTo("5.000000");
+        assertThat(kardexRepository.findByMovimientoId(primera.id()).get(0).getCostoUnitario())
+                .isEqualByComparingTo("5.000000");
+
+        data.producto().setCostoReferencial(new BigDecimal("15.0000"));
+        productoRepository.save(data.producto());
+        assertThat(movimientoInventarioService.obtener(primera.id()).detalles().get(0).costoBaseComercialSinIgv())
+                .isEqualByComparingTo("12.71");
+
+        var segunda = movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                data,
+                true,
+                "OS-100",
+                new BigDecimal("1.0000"),
+                new BigDecimal("25.00")
+        ), authentication());
+        assertThat(segunda.detalles().get(0).costoBaseComercialSinIgv()).isEqualByComparingTo("15.00");
+        assertThat(segunda.detalles().get(0).valorVentaUnitarioSinIgv()).isEqualByComparingTo("18.75");
+    }
+
+    @Test
+    void salidaNoComercialNoRequiereOsCostoBaseNiRecargo() {
+        TestData data = crearDatosBase();
+        data.producto().setCostoReferencial(null);
+        productoRepository.save(data.producto());
+        confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("5.000000"));
+
+        var response = movimientoInventarioService.crearMovimiento(crearSalidaConsumoRequest(
+                data,
+                true,
+                "SALIDA-NO-COMERCIAL",
+                new BigDecimal("3.0000")
+        ), authentication());
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.CONFIRMADO);
+        assertThat(response.ordenTrabajo()).isNull();
+        assertThat(response.detalles().get(0).costoBaseComercialSinIgv()).isNull();
+        assertThat(response.detalles().get(0).recargoComercialPct()).isNull();
+        assertThat(response.detalles().get(0).valorVentaTotalSinIgv()).isNull();
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("7.0000");
+    }
+
+    @Test
+    void salidaConsumoAceptaOrdenServicioOpcional() {
+        TestData data = crearDatosBase();
+        confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("5.000000"));
+
+        var response = movimientoInventarioService.crearMovimiento(crearSalidaConsumoRequest(
+                data,
+                true,
+                "SALIDA-CONSUMO-OS",
+                new BigDecimal("2.0000"),
+                "OS-CONS-001"
+        ), authentication());
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.CONFIRMADO);
+        assertThat(response.ordenTrabajo()).isEqualTo("OS-CONS-001");
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("8.0000");
+    }
+
+    @Test
+    void anularSalidaVentaPreservaSnapshotComercialHistorico() {
+        TestData data = crearDatosBase();
+        data.producto().setCostoReferencial(new BigDecimal("12.7100"));
+        productoRepository.save(data.producto());
+        confirmarEntrada(data, new BigDecimal("10.0000"), new BigDecimal("5.000000"));
+        var salida = movimientoInventarioService.crearMovimiento(crearSalidaVentaRequest(
+                data,
+                true,
+                "OS-ANULAR",
+                new BigDecimal("2.0000"),
+                new BigDecimal("35.00")
+        ), authentication());
+
+        data.producto().setCostoReferencial(new BigDecimal("15.0000"));
+        productoRepository.save(data.producto());
+        movimientoInventarioService.anularMovimiento(salida.id(), "Error comercial");
+
+        var anulada = movimientoInventarioService.obtener(salida.id());
+        assertThat(anulada.estado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
+        assertThat(anulada.detalles().get(0).costoBaseComercialSinIgv()).isEqualByComparingTo("12.71");
+        assertThat(anulada.detalles().get(0).precioVentaTotalConIgv()).isEqualByComparingTo("40.50");
+        assertThat(stockActualRepository.findByProductoIdAndAlmacenIdAndUbicacionIsNull(
+                data.producto().getId(),
+                data.almacenOrigen().getId()
+        ).orElseThrow().getCantidadActual()).isEqualByComparingTo("10.0000");
+        assertThat(kardexRepository.findByMovimientoId(salida.id())).hasSize(2);
+    }
+
+    @Test
+    void anularMovimientoRegistraMotivoYUsuarioEnRespuesta() {
+        TestData data = crearDatosBase();
+        MovimientoInventarioEntity entrada = confirmarEntrada(data, new BigDecimal("10.0000"));
+
+        var anulada = movimientoInventarioService.anularMovimiento(
+                entrada.getId(),
+                new MovimientoAnulacionRequest("  Error de ingreso  "),
+                authentication()
+        );
+
+        assertThat(anulada.estado()).isEqualTo(EstadoMovimientoInventario.ANULADO);
+        assertThat(anulada.motivoAnulacion()).isEqualTo("Error de ingreso");
+        assertThat(anulada.anuladoPor()).isEqualTo("admin");
+        assertThat(anulada.anuladoEn()).isNotNull();
+
+        MovimientoInventarioEntity persistida = movimientoInventarioRepository.findById(entrada.getId()).orElseThrow();
+        assertThat(persistida.getMotivoAnulacion()).isEqualTo("Error de ingreso");
+        assertThat(persistida.getAnuladoPor()).isEqualTo("admin");
+    }
+
+    @Test
     void salidaAjusteConfirmadaDisminuyeStockYGeneraKardex() {
         TestData data = crearDatosBase();
         confirmarEntrada(data, new BigDecimal("9.0000"));
@@ -838,7 +1084,7 @@ class MovimientoInventarioServiceTest {
     }
 
     @Test
-    void ajustePositivoSinObservacionFalla() {
+    void ajustePositivoSinObservacionEsValida() {
         TestData data = crearDatosBase();
         MovimientoInventarioCreateRequest request = crearRequestOperativo(
                 TipoMovimientoInventario.AJUSTE_POSITIVO,
@@ -853,9 +1099,10 @@ class MovimientoInventarioServiceTest {
                 null
         );
 
-        assertThatThrownBy(() -> movimientoInventarioService.crearMovimiento(request, authentication()))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("observacion");
+        var response = movimientoInventarioService.crearMovimiento(request, authentication());
+
+        assertThat(response.estado()).isEqualTo(EstadoMovimientoInventario.BORRADOR);
+        assertThat(response.observacion()).isNull();
     }
 
     @Test
@@ -2283,6 +2530,16 @@ class MovimientoInventarioServiceTest {
             String documentoReferencia,
             BigDecimal cantidad
     ) {
+        return crearSalidaConsumoRequest(data, confirmar, documentoReferencia, cantidad, null);
+    }
+
+    private MovimientoInventarioCreateRequest crearSalidaConsumoRequest(
+            TestData data,
+            Boolean confirmar,
+            String documentoReferencia,
+            BigDecimal cantidad,
+            String ordenTrabajo
+    ) {
         return new MovimientoInventarioCreateRequest(
                 TipoMovimientoInventario.SALIDA_CONSUMO,
                 LocalDateTime.now(),
@@ -2294,7 +2551,7 @@ class MovimientoInventarioServiceTest {
                 documentoReferencia,
                 "Salida consumo de prueba",
                 "Consumo interno",
-                "OT-001",
+                ordenTrabajo,
                 "Mantenimiento",
                 "Usuario solicitante",
                 null,
@@ -2318,6 +2575,7 @@ class MovimientoInventarioServiceTest {
                 null,
                 null,
                 null,
+                data.personal().getId(),
                 List.of(new MovimientoDetalleCreateRequest(
                         data.producto().getId(),
                         null,
@@ -2325,6 +2583,64 @@ class MovimientoInventarioServiceTest {
                         cantidad,
                         null,
                         "Detalle salida"
+                ))
+        );
+    }
+
+    private MovimientoInventarioCreateRequest crearSalidaVentaRequest(
+            TestData data,
+            Boolean confirmar,
+            String ordenTrabajo,
+            BigDecimal cantidad,
+            BigDecimal recargoComercialPct
+    ) {
+        return new MovimientoInventarioCreateRequest(
+                TipoMovimientoInventario.SALIDA_VENTA,
+                LocalDateTime.now(),
+                null,
+                data.almacenOrigen().getId(),
+                null,
+                null,
+                null,
+                "VENTA-" + UUID.randomUUID(),
+                "Salida venta de prueba",
+                null,
+                ordenTrabajo,
+                null,
+                null,
+                null,
+                null,
+                confirmar,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                data.personal().getId(),
+                List.of(new MovimientoDetalleCreateRequest(
+                        data.producto().getId(),
+                        null,
+                        null,
+                        cantidad,
+                        null,
+                        null,
+                        null,
+                        null,
+                        recargoComercialPct,
+                        "Detalle salida venta"
                 ))
         );
     }
@@ -2429,6 +2745,7 @@ class MovimientoInventarioServiceTest {
                 null,
                 null,
                 null,
+                personalRetiraIdParaSalida(tipoMovimiento, data),
                 List.of(new MovimientoDetalleCreateRequest(
                         data.producto().getId(),
                         null,
@@ -2517,6 +2834,13 @@ class MovimientoInventarioServiceTest {
         );
     }
 
+    private Long personalRetiraIdParaSalida(TipoMovimientoInventario tipoMovimiento, TestData data) {
+        return tipoMovimiento == TipoMovimientoInventario.SALIDA_CONSUMO
+                || tipoMovimiento == TipoMovimientoInventario.SALIDA_VENTA
+                ? data.personal().getId()
+                : null;
+    }
+
     private UsernamePasswordAuthenticationToken authentication() {
         return new UsernamePasswordAuthenticationToken(
                 "admin",
@@ -2598,9 +2922,10 @@ class MovimientoInventarioServiceTest {
         TipoArticuloEntity tipoArticulo = tipoArticuloRepository.findByCodigoIgnoreCase("ALMACEN").orElseThrow();
         ProductoEntity producto = crearProducto(unidad, familia, tipoArticulo);
         ProveedorEntity proveedor = crearProveedor();
+        PersonalEntity personal = crearPersonal();
         AlmacenEntity almacenOrigen = crearAlmacen();
         AlmacenEntity almacenDestino = crearAlmacen();
-        return new TestData(usuario, producto, proveedor, almacenOrigen, almacenDestino);
+        return new TestData(usuario, producto, proveedor, personal, almacenOrigen, almacenDestino);
     }
 
     private UnidadMedidaEntity crearUnidadMedida() {
@@ -2650,6 +2975,19 @@ class MovimientoInventarioServiceTest {
         return proveedorRepository.save(proveedor);
     }
 
+    private PersonalEntity crearPersonal() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        PersonalEntity personal = new PersonalEntity();
+        personal.setTipoDocumento("DNI");
+        personal.setNumeroDocumento("7" + suffix.substring(0, 8));
+        personal.setNombres("Personal Test " + suffix);
+        personal.setApellidos("Salida");
+        personal.setCargo("Tecnico");
+        personal.setArea("Operaciones");
+        personal.setActivo(true);
+        return personalRepository.save(personal);
+    }
+
     private AlmacenEntity crearAlmacen() {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         AlmacenEntity almacen = new AlmacenEntity();
@@ -2663,6 +3001,7 @@ class MovimientoInventarioServiceTest {
             UsuarioEntity usuario,
             ProductoEntity producto,
             ProveedorEntity proveedor,
+            PersonalEntity personal,
             AlmacenEntity almacenOrigen,
             AlmacenEntity almacenDestino
     ) {

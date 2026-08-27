@@ -171,7 +171,7 @@ public class ProductoService {
             throw new BusinessException("El stock maximo no puede ser negativo");
         }
         if (costoReferencial != null && costoReferencial.compareTo(BigDecimal.ZERO) < 0) {
-            throw new BusinessException("El costo referencial no puede ser negativo");
+            throw new BusinessException("El costo base comercial sin IGV no puede ser negativo");
         }
         if (stockMaximo != null && stockMaximo.compareTo(stockMinimo) < 0) {
             throw new BusinessException("El stock maximo debe ser mayor o igual al stock minimo");

@@ -3,6 +3,7 @@ package pe.com.ballena.erpalmacen.reportes.inventario.pdf;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pe.com.ballena.erpalmacen.inventario.movimientos.entity.MovimientoDetalleEntity;
@@ -11,6 +12,9 @@ import pe.com.ballena.erpalmacen.inventario.shared.TipoMovimientoInventario;
 import pe.com.ballena.erpalmacen.reportes.inventario.dto.ArchivoReporteResponse;
 import pe.com.ballena.erpalmacen.shared.exception.ResourceNotFoundException;
 
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -20,6 +24,7 @@ import java.util.Map;
 public class MovimientoPdfService {
 
     private final PdfReportService pdfReportService;
+    private final String logoDataUri;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -29,14 +34,16 @@ public class MovimientoPdfService {
 
     public MovimientoPdfService(PdfReportService pdfReportService) {
         this.pdfReportService = pdfReportService;
+        this.logoDataUri = cargarLogoDataUri();
     }
 
     @Transactional(readOnly = true)
     public ArchivoReporteResponse generarMovimientoPdf(Long movimientoId, boolean verCostos, String generadoPor) {
         MovimientoInventarioEntity movimiento = obtenerMovimiento(movimientoId);
-        List<MovimientoDetalleEntity> detalles = obtenerDetalles(movimientoId);
+        List<MovimientoPdfDetalle> detalles = obtenerDetalles(movimientoId);
         Map<String, Object> model = new HashMap<>();
         model.put("empresa", nombreEmpresa);
+        model.put("logoDataUri", logoDataUri);
         model.put("documentoNombre", nombreDocumento(movimiento.getTipoMovimiento()));
         model.put("movimiento", movimiento);
         model.put("proveedor", movimiento.getProveedor());
@@ -56,6 +63,7 @@ public class MovimientoPdfService {
                         from MovimientoInventarioEntity m
                         join fetch m.usuario u
                         left join fetch m.proveedor pr
+                        left join fetch m.personalRetira pe
                         left join fetch m.almacenOrigen ao
                         left join fetch m.almacenDestino ad
                         where m.id = :movimientoId
@@ -68,8 +76,8 @@ public class MovimientoPdfService {
         return movimientos.get(0);
     }
 
-    private List<MovimientoDetalleEntity> obtenerDetalles(Long movimientoId) {
-        return entityManager.createQuery("""
+    private List<MovimientoPdfDetalle> obtenerDetalles(Long movimientoId) {
+        List<MovimientoDetalleEntity> detalles = entityManager.createQuery("""
                         select d
                         from MovimientoDetalleEntity d
                         join fetch d.producto p
@@ -81,6 +89,65 @@ public class MovimientoPdfService {
                         """, MovimientoDetalleEntity.class)
                 .setParameter("movimientoId", movimientoId)
                 .getResultList();
+
+        Map<Long, BigDecimal> costosSalida = new HashMap<>();
+        entityManager.createQuery("""
+                        select k.movimientoDetalle.id, k.costoUnitario
+                        from KardexEntity k
+                        where k.movimiento.id = :movimientoId
+                          and k.salida > 0
+                        order by k.id asc
+                        """, Object[].class)
+                .setParameter("movimientoId", movimientoId)
+                .getResultList()
+                .forEach(row -> costosSalida.putIfAbsent((Long) row[0], (BigDecimal) row[1]));
+
+        return detalles.stream()
+                .map(detalle -> {
+                    BigDecimal costoUnitario = detalle.getCostoUnitario() != null
+                            ? detalle.getCostoUnitario()
+                            : costosSalida.get(detalle.getId());
+                    BigDecimal totalLinea = detalle.getTotalLinea() != null
+                            ? detalle.getTotalLinea()
+                            : calcularTotal(detalle.getCantidad(), costoUnitario);
+                    return new MovimientoPdfDetalle(
+                            detalle.getProducto().getCodigo(),
+                            detalle.getProducto().getNombre(),
+                            detalle.getProducto().getUnidadMedida().getAbreviatura(),
+                            detalle.getCantidad(),
+                            costoUnitario,
+                            totalLinea
+                    );
+                })
+                .toList();
+    }
+
+    private BigDecimal calcularTotal(BigDecimal cantidad, BigDecimal costoUnitario) {
+        if (cantidad == null || costoUnitario == null) {
+            return null;
+        }
+        return cantidad.multiply(costoUnitario);
+    }
+
+    private String cargarLogoDataUri() {
+        ClassPathResource logo = new ClassPathResource("reportes/logo_ballena_02.b64");
+        try (var input = logo.getInputStream()) {
+            String base64 = new String(input.readAllBytes(), StandardCharsets.US_ASCII)
+                    .replaceAll("\\s+", "");
+            return "data:image/png;base64," + base64;
+        } catch (IOException e) {
+            throw new IllegalStateException("No se pudo cargar el logo para los PDF de movimiento", e);
+        }
+    }
+
+    public record MovimientoPdfDetalle(
+            String productoCodigo,
+            String productoNombre,
+            String unidadAbreviatura,
+            BigDecimal cantidad,
+            BigDecimal costoUnitario,
+            BigDecimal totalLinea
+    ) {
     }
 
     private String nombreDocumento(TipoMovimientoInventario tipoMovimiento) {

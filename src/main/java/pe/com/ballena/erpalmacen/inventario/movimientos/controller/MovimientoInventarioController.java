@@ -101,7 +101,7 @@ public class MovimientoInventarioController {
     }
 
     @GetMapping("/{entradaId}/cantidades-devolucion")
-    @PreAuthorize("hasAuthority('INVENTARIO_DEVOLUCION_VER') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('INVENTARIO_DEVOLUCION_CREAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<List<MovimientoDetalleDevolucionPendienteResponse>>> obtenerCantidadesDevolucion(
             @PathVariable Long entradaId
     ) {

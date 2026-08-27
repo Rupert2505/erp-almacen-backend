@@ -1,7 +1,9 @@
 package pe.com.ballena.erpalmacen.inventario.kardex.service;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +25,8 @@ import java.util.Locale;
 @Service
 public class KardexConsultaService {
 
+    private static final Sort ORDEN_GRILLA = Sort.by("fechaMovimiento", "id").descending();
+
     private final KardexRepository kardexRepository;
 
     public KardexConsultaService(KardexRepository kardexRepository) {
@@ -42,8 +46,12 @@ public class KardexConsultaService {
     ) {
         return kardexRepository.findAll(
                 buildSpecification(productoId, almacenId, ubicacionId, tipoMovimiento, fechaDesde, fechaHasta, texto),
-                pageable
+                ordenarGrilla(pageable)
         ).map(this::toResponse);
+    }
+
+    private Pageable ordenarGrilla(Pageable pageable) {
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), ORDEN_GRILLA);
     }
 
     @Transactional(readOnly = true)

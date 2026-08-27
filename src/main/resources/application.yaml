@@ -17,7 +17,7 @@ management:
         enabled: true
 
 jwt:
-  expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+  expiration-minutes: ${JWT_EXPIRATION_MINUTES:240}
   issuer: ${JWT_ISSUER:erp-almacen-backend}
 
 app:
