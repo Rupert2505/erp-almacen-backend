@@ -1268,6 +1268,7 @@ class InventarioConsultaReporteServiceTest {
                 null,
                 null,
                 null,
+                data.personal().getId(),
                 List.of(new MovimientoDetalleCreateRequest(
                         data.producto().getId(),
                         null,

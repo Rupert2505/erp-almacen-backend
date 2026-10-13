@@ -47,13 +47,13 @@ public class AlmacenController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_CREAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<AlmacenResponse>> crear(@Valid @RequestBody AlmacenCreateRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Almacen creado correctamente", almacenService.crear(request)));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_EDITAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<AlmacenResponse>> actualizar(
             @PathVariable Long id,
             @Valid @RequestBody AlmacenUpdateRequest request
@@ -62,13 +62,13 @@ public class AlmacenController {
     }
 
     @PatchMapping("/{id}/desactivar")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_DESACTIVAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<AlmacenResponse>> desactivar(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok("Almacen desactivado correctamente", almacenService.desactivar(id)));
     }
 
     @PatchMapping("/{id}/activar")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_DESACTIVAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<AlmacenResponse>> activar(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok("Almacen activado correctamente", almacenService.activar(id)));
     }

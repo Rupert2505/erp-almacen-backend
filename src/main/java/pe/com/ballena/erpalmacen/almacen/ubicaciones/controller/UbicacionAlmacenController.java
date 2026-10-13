@@ -58,13 +58,13 @@ public class UbicacionAlmacenController {
     }
 
     @PostMapping("/api/ubicaciones")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_CREAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<UbicacionAlmacenResponse>> crear(@Valid @RequestBody UbicacionAlmacenCreateRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Ubicacion creada correctamente", ubicacionService.crear(request)));
     }
 
     @PutMapping("/api/ubicaciones/{id}")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_EDITAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<UbicacionAlmacenResponse>> actualizar(
             @PathVariable Long id,
             @Valid @RequestBody UbicacionAlmacenUpdateRequest request
@@ -73,13 +73,13 @@ public class UbicacionAlmacenController {
     }
 
     @PatchMapping("/api/ubicaciones/{id}/desactivar")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_DESACTIVAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<UbicacionAlmacenResponse>> desactivar(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok("Ubicacion desactivada correctamente", ubicacionService.desactivar(id)));
     }
 
     @PatchMapping("/api/ubicaciones/{id}/activar")
-    @PreAuthorize("hasAuthority('USUARIO_ADMIN') or hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ALMACEN_DESACTIVAR') or hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<UbicacionAlmacenResponse>> activar(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok("Ubicacion activada correctamente", ubicacionService.activar(id)));
     }

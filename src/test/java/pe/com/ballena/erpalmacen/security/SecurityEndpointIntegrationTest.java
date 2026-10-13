@@ -7,6 +7,13 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
+import pe.com.ballena.erpalmacen.almacen.almacenes.dto.AlmacenCreateRequest;
+import pe.com.ballena.erpalmacen.almacen.almacenes.service.AlmacenService;
+import pe.com.ballena.erpalmacen.almacen.ubicaciones.dto.UbicacionAlmacenCreateRequest;
+import pe.com.ballena.erpalmacen.almacen.ubicaciones.service.UbicacionAlmacenService;
+import pe.com.ballena.erpalmacen.maestros.personal.dto.PersonalCreateRequest;
+import pe.com.ballena.erpalmacen.maestros.personal.dto.PersonalResponse;
+import pe.com.ballena.erpalmacen.maestros.personal.service.PersonalService;
 import pe.com.ballena.erpalmacen.shared.security.JwtService;
 import pe.com.ballena.erpalmacen.usuarios.entity.RolEntity;
 import pe.com.ballena.erpalmacen.usuarios.entity.UsuarioEntity;
@@ -42,6 +49,15 @@ class SecurityEndpointIntegrationTest {
 
     @Autowired
     private PermisoRepository permisoRepository;
+
+    @Autowired
+    private PersonalService personalService;
+
+    @Autowired
+    private AlmacenService almacenService;
+
+    @Autowired
+    private UbicacionAlmacenService ubicacionAlmacenService;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -165,6 +181,152 @@ class SecurityEndpointIntegrationTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content(payload))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void jefeAlmacenConPermisosPersonalGestionaPersonalPeroNoUsuarios() throws Exception {
+        UsuarioEntity usuario = crearUsuario("jefe_personal", true, "JEFE_ALMACEN");
+        String token = jwtService.generateToken(
+                usuario.getUsername(),
+                List.of("JEFE_ALMACEN"),
+                List.of("PERSONAL_VER", "PERSONAL_CREAR", "PERSONAL_EDITAR", "PERSONAL_DESACTIVAR")
+        );
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        PersonalResponse personal = personalService.crear(new PersonalCreateRequest(
+                "DNI",
+                "8" + suffix,
+                "Personal existente " + suffix,
+                "Almacen",
+                "Auxiliar",
+                "Operaciones",
+                "999888777",
+                "personal.existente." + suffix + "@demo.com"
+        ));
+        String payloadNuevo = """
+                {
+                  "tipoDocumento": "DNI",
+                  "numeroDocumento": "9%s",
+                  "nombres": "Personal jefe %s"
+                }
+                """.formatted(suffix, suffix);
+        String payloadEditar = """
+                {
+                  "tipoDocumento": "DNI",
+                  "numeroDocumento": "%s",
+                  "nombres": "Personal jefe editado %s"
+                }
+                """.formatted(personal.numeroDocumento(), suffix);
+
+        mockMvc.perform(get("/api/personal?activo=true&size=5")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/personal/" + personal.id())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/personal")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content(payloadNuevo))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/personal/" + personal.id())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content(payloadEditar))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/personal/" + personal.id() + "/desactivar")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/personal/" + personal.id() + "/activar")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/usuarios")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void jefeAlmacenGestionaAlmacenesYUbicacionesPeroNoUsuarios() throws Exception {
+        UsuarioEntity usuario = crearUsuario("jefe_almacenes", true, "JEFE_ALMACEN");
+        String token = jwtService.generateToken(
+                usuario.getUsername(),
+                List.of("JEFE_ALMACEN"),
+                List.of("ALMACEN_VER", "ALMACEN_CREAR", "ALMACEN_EDITAR", "ALMACEN_DESACTIVAR")
+        );
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        var almacen = almacenService.crear(new AlmacenCreateRequest(
+                "AJ" + suffix,
+                "Almacen existente " + suffix,
+                "Direccion inicial",
+                "Responsable inicial"
+        ));
+        var ubicacion = ubicacionAlmacenService.crear(new UbicacionAlmacenCreateRequest(
+                almacen.id(),
+                "UJ" + suffix,
+                "Ubicacion existente " + suffix,
+                "Descripcion inicial"
+        ));
+        String payloadAlmacenNuevo = """
+                {
+                  "codigo": "AN%s",
+                  "nombre": "Almacen jefe %s"
+                }
+                """.formatted(suffix, suffix);
+        String payloadAlmacenEditar = """
+                {
+                  "codigo": "%s",
+                  "nombre": "Almacen jefe editado %s"
+                }
+                """.formatted(almacen.codigo(), suffix);
+        String payloadUbicacionNueva = """
+                {
+                  "almacenId": %d,
+                  "codigo": "UN%s",
+                  "nombre": "Ubicacion jefe %s"
+                }
+                """.formatted(almacen.id(), suffix, suffix);
+        String payloadUbicacionEditar = """
+                {
+                  "almacenId": %d,
+                  "codigo": "%s",
+                  "nombre": "Ubicacion jefe editada %s"
+                }
+                """.formatted(almacen.id(), ubicacion.codigo(), suffix);
+
+        mockMvc.perform(post("/api/almacenes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content(payloadAlmacenNuevo))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/almacenes/" + almacen.id())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content(payloadAlmacenEditar))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/almacenes/" + almacen.id() + "/desactivar")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/almacenes/" + almacen.id() + "/activar")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/ubicaciones")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content(payloadUbicacionNueva))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/ubicaciones/" + ubicacion.id())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType("application/json")
+                        .content(payloadUbicacionEditar))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/ubicaciones/" + ubicacion.id() + "/desactivar")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/ubicaciones/" + ubicacion.id() + "/activar")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/usuarios")
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden());
     }
 
